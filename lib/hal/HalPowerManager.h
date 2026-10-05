@@ -42,6 +42,11 @@ class HalPowerManager {
   // Should be called inside main loop() to handle the currentLockMode
   void startDeepSleep(HalGPIO& gpio) const;
 
+  // Pass-through to freeink::PowerManager::stuckReleaseCount() -- see that
+  // method's doc comment. Diagnostic for "device stayed awake instead of
+  // sleeping"; log at boot, don't gate behavior on it.
+  static uint32_t stuckReleaseCount();
+
   // LilyGo T5 4.7 only (see .cpp): replaces the idle-branch delay(50) with a
   // real ESP32 light sleep, waking instantly on any front/power button or a
   // bounded timer. Returns false (caller should delay() as before) when any
@@ -53,6 +58,14 @@ class HalPowerManager {
 
   // Get battery percentage (range 0-100)
   uint16_t getBatteryPercentage() const;
+
+  // Forced, uncached millivolt read, bypassing getBatteryPercentage()'s
+  // cache -- for pinning an exact voltage to a precise moment (e.g. the
+  // sleep/wake boundary) rather than whatever's in the cache. On a gauge-
+  // equipped board this reads the gauge's own voltage register over I2C and
+  // never touches the display; on an ADC board it takes a real ADC sample,
+  // which on some boards means briefly powering a rail the divider rides.
+  uint16_t readBatteryMillivoltsForced() const;
 
   // RAII helper class to manage power saving locks
   // Usage: create an instance of Lock in a scope to disable power saving, for example when running a task that needs

@@ -108,6 +108,25 @@ void HalPowerManager::startDeepSleep(HalGPIO& gpio) const {
   // guarantees that ordering).
   freeink::PowerManager::powerDownRailsForSleep();
 
+#if FREEINK_DEVICE_LILYGO_T5_47
+  // This board's SD card has no power-enable pin at all (see BoardConfig.h's
+  // T5_47 profile comment, "no power gate") -- powerDownRailsForSleep()
+  // above is a no-op for it, so the card stays powered through deep sleep
+  // regardless. The one thing still controllable is CS: left floating under
+  // esp_sleep_config_gpio_isolate(), an SD card's active-low CS could settle
+  // anywhere, including appearing selected, which can keep the card's SPI
+  // logic from reaching its lowest-current standby state. Hold it explicitly
+  // deselected (HIGH) through sleep; cheap, and the only lever available
+  // without hardware rework to add a real power switch.
+  if (BoardConfig::isLilyGoT5_47() && BoardConfig::ACTIVE.sd.cs >= 0) {
+    const auto cs = static_cast<gpio_num_t>(BoardConfig::ACTIVE.sd.cs);
+    gpio_hold_dis(cs);
+    gpio_set_direction(cs, GPIO_MODE_OUTPUT);
+    gpio_set_level(cs, HIGH);
+    gpio_hold_en(cs);
+  }
+#endif
+
 #if FREEINK_DEVICE_PAPERMONO
   // Its power button is behind the M5PM1 PMIC rather than an ESP GPIO, so
   // normal GPIO deep sleep would have no wake source. Ask the PMIC to shut the
@@ -121,6 +140,8 @@ void HalPowerManager::startDeepSleep(HalGPIO& gpio) const {
   // immediately wake the device again), then arms the wake source and sleeps.
   freeink::PowerManager::deepSleepUntilPowerButton();
 }
+
+uint32_t HalPowerManager::stuckReleaseCount() { return freeink::PowerManager::stuckReleaseCount(); }
 
 bool HalPowerManager::lightSleepIfIdle() {
 #if FREEINK_DEVICE_LILYGO_T5_47
@@ -200,6 +221,11 @@ uint16_t HalPowerManager::getBatteryPercentage() const {
     _batteryCachedPercent = (_batteryCachedPercent * 9 + battery.readPercentage() * 10) / 10;
   }
   return _batteryCachedPercent / 10;
+}
+
+uint16_t HalPowerManager::readBatteryMillivoltsForced() const {
+  static const BatteryMonitor battery;
+  return battery.readMillivolts();
 }
 
 HalPowerManager::Lock::Lock() {

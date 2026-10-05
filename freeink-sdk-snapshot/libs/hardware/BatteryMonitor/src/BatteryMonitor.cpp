@@ -266,21 +266,37 @@ bool lc709203fWriteWord(uint8_t addr, uint8_t command, uint16_t data) {
 // board's Therm pin is left unconnected (see BoardConfig.h's T5_47 profile
 // comment); thermistor mode with nothing attached would feed the gauge a
 // floating/invalid temperature instead of its internal default.
-void lc709203fEnsureInit(uint8_t addr) {
+//
+// Retries on failure rather than latching "done" either way: an I2C glitch
+// during the very first attempt (e.g. the bus not fully settled yet right
+// after boot) used to leave `inited` permanently true with some/all of these
+// writes never having landed -- the gauge then free-runs on whatever its
+// power-on-reset defaults are (wrong power mode, wrong pack-size compensation,
+// wrong profile) for the rest of the session, no further attempt possible.
+// Each readGaugeSoc()/readGaugeMillivolts() call is already throttled by
+// HalPowerManager's cache (~1.5s), so a retry-every-call here on persistent
+// failure is bounded, not a tight loop.
+bool lc709203fEnsureInit(uint8_t addr) {
   static bool inited = false;
-  if (inited) return;
-  lc709203fWriteWord(addr, LC709203F_CMD_POWERMODE, 0x0001);
-  lc709203fWriteWord(addr, LC709203F_CMD_APA, LC709203F_APA_2000MAH);
-  lc709203fWriteWord(addr, LC709203F_CMD_BATTPROF, 0x0001);
-  lc709203fWriteWord(addr, LC709203F_CMD_STATUSBIT, 0x0000);
+  if (inited) return true;
+  bool ok = true;
+  ok &= lc709203fWriteWord(addr, LC709203F_CMD_POWERMODE, 0x0001);
+  ok &= lc709203fWriteWord(addr, LC709203F_CMD_APA, LC709203F_APA_2000MAH);
+  ok &= lc709203fWriteWord(addr, LC709203F_CMD_BATTPROF, 0x0001);
+  ok &= lc709203fWriteWord(addr, LC709203F_CMD_STATUSBIT, 0x0000);
+  if (!ok) {
+    LOG_ERR("BAT", "LC709203F init: one or more writes failed, will retry on next read");
+    return false;
+  }
   inited = true;
+  return true;
 }
 
 // SoC (0..100) from the active gauge, dispatched by type. false on I2C failure.
 bool readGaugeSoc(uint16_t& out) {
   const auto& g = BoardConfig::ACTIVE.batteryGauge;
   if (g.gaugeType == BoardConfig::GaugeType::Lc709203f) {
-    lc709203fEnsureInit(g.gaugeAddr);
+    if (!lc709203fEnsureInit(g.gaugeAddr)) return false;
     uint16_t rsoc = 0;
     if (!lc709203fReadWord(g.gaugeAddr, LC709203F_CMD_RSOC, rsoc)) return false;
     out = rsoc > 100 ? 100 : rsoc;
@@ -307,7 +323,11 @@ bool readGaugeSoc(uint16_t& out) {
 bool readGaugeMillivolts(uint16_t& out) {
   const auto& g = BoardConfig::ACTIVE.batteryGauge;
   if (g.gaugeType == BoardConfig::GaugeType::Lc709203f) {
-    lc709203fEnsureInit(g.gaugeAddr);
+    // Best-effort: cell voltage is a near-raw ADC reading on this chip, not
+    // dependent on the RSOC-algorithm config init sets up, so still attempt
+    // the read even if init hasn't succeeded yet (unlike readGaugeSoc, which
+    // gates on it since RSOC accuracy does depend on that config).
+    (void)lc709203fEnsureInit(g.gaugeAddr);
     uint16_t mv = 0;
     if (!lc709203fReadWord(g.gaugeAddr, LC709203F_CMD_CELLVOLTAGE, mv)) return false;
     out = mv;

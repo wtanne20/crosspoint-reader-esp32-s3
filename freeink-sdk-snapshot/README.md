@@ -1,4 +1,4 @@
-# freeink-sdk snapshot — LC709203F battery gauge work
+# freeink-sdk snapshot — battery gauge + overnight-drain fixes
 
 The actual build uses these files from the `freeink-sdk` git submodule
 (`origin` = `https://github.com/Free-Ink/freeink-sdk.git`, a shared upstream
@@ -25,11 +25,26 @@ reading effort.
 
 - `libs/hardware/BatteryMonitor/include/BatteryMonitor.h`
 - `libs/hardware/BatteryMonitor/src/BatteryMonitor.cpp` — LC709203F register
-  reads (RSOC, cell voltage), CRC8 (SMBus PEC), init sequence, and an I2C
-  bus-recovery routine.
+  reads (RSOC, cell voltage), CRC8 (SMBus PEC), init sequence (now
+  retry-on-failure instead of latching "done" after a failed write), and an
+  I2C bus-recovery routine.
 - `libs/hardware/BoardConfig/include/BoardConfig.h` — `GaugeType::Lc709203f`,
   the `FREEINK_BATTERY_I2C_GAUGE` gate, and the T5_47 profile's `batteryGauge`
   field (GPIO17 SCL / GPIO18 SDA, address 0x0B).
+- `libs/hardware/PowerManager/include/PowerManager.h` / `src/PowerManager.cpp`
+  — `waitForPowerButtonRelease()` now bounded (10s timeout instead of an
+  unbounded spin that could keep the device awake all night at full CPU
+  power), plus a persistent `stuckReleaseCount()` diagnostic that survives
+  deep sleep/restart.
+- `libs/hardware/SDCardManager/src/SDCardManager.cpp` — releases a CS-pin
+  hold on init (paired with the HalPowerManager.cpp change in the main repo
+  that holds SD CS high through sleep on boards with no SD power-enable pin).
+- `libs/display/FreeInkDisplay/src/driver/Ed047Tc1Driver.cpp` — holds the
+  ED047TC1 shift-register's 3 control pins (CFG_DATA/CFG_CLK/CFG_STR) through
+  deep sleep so they can't pick up noise and accidentally re-latch the panel
+  boost rail on; this file is a full copy (it's untracked/new in the
+  submodule from an earlier session's T5_47 display-driver work, not
+  something this fix can be cleanly separated from).
 
 ## To actually apply this to the submodule
 
@@ -38,10 +53,14 @@ The submodule checkout under `freeink-sdk/` already has these exact changes
 
 ```sh
 cd freeink-sdk
-git checkout -b feature/lc709203f-battery-gauge
+git checkout -b feature/t5-47-overnight-drain-fixes
 git add libs/hardware/BatteryMonitor/include/BatteryMonitor.h \
         libs/hardware/BatteryMonitor/src/BatteryMonitor.cpp \
-        libs/hardware/BoardConfig/include/BoardConfig.h
-git commit -m "feat: add LC709203F I2C fuel gauge support for LilyGo T5 4.7"
+        libs/hardware/BoardConfig/include/BoardConfig.h \
+        libs/hardware/PowerManager/include/PowerManager.h \
+        libs/hardware/PowerManager/src/PowerManager.cpp \
+        libs/hardware/SDCardManager/src/SDCardManager.cpp \
+        libs/display/FreeInkDisplay/src/driver/Ed047Tc1Driver.cpp
+git commit -m "fix: overnight battery drain on LilyGo T5 4.7"
 # then push to your own fork of Free-Ink/freeink-sdk, not origin
 ```

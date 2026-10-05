@@ -1,9 +1,6 @@
 #include <Arduino.h>
 #include <BoardConfig.h>
 #include <Ed047Tc1RefreshTuning.h>
-#if FREEINK_DEVICE_LILYGO_T5_47
-#include <Ed047Tc1Battery.h>
-#endif
 #include <Epub.h>
 #include <FontCacheManager.h>
 #include <FontDecompressor.h>
@@ -296,13 +293,15 @@ void enterDeepSleep(bool fromTimeout = false, bool lowBattery = false) {
   }
 
 #if FREEINK_DEVICE_LILYGO_T5_47
-  // Forced, uncached read (bypasses BoardT5_47's 5-min cache) right at the
-  // sleep/wake boundary, so an overnight drain question has an exact voltage
-  // pinned to a precise time instead of a percentage read off the screen at
-  // whatever moment the user happened to look.
+  // Forced, uncached read (bypasses getBatteryPercentage()'s cache) right at
+  // the sleep/wake boundary, so an overnight drain question has an exact
+  // voltage pinned to a precise time instead of a percentage read off the
+  // screen at whatever moment the user happened to look. Reads the LC709203F
+  // gauge's own voltage register over I2C -- unlike the old ADC divider path,
+  // this never powers the EPD boost rail just to take a diagnostic sample.
   if (BoardConfig::isLilyGoT5_47()) {
-    uint16_t mv = 0;
-    if (freeink::ed047Tc1ReadBatteryMillivolts(mv)) {
+    const uint16_t mv = powerManager.readBatteryMillivoltsForced();
+    if (mv > 0) {
       LOG_INF("BAT", "Pre-sleep voltage: %u mV", mv);
     }
   }
@@ -435,6 +434,14 @@ void setup() {
   LOG_INF("MAIN", "Boot: reset reason %d, wake cause %d, wake reason %d, ext1 pins 0x%llx",
           static_cast<int>(esp_reset_reason()), static_cast<int>(esp_sleep_get_wakeup_cause()),
           static_cast<int>(wakeupReason), static_cast<unsigned long long>(esp_sleep_get_ext1_wakeup_status()));
+  // Diagnostic for "device stayed awake instead of sleeping": nonzero means
+  // waitForPowerButtonRelease() hit its timeout at least once since the last
+  // power loss (see PowerManager.cpp). Survives deep sleep/restart, so this
+  // is visible on the next boot even if nobody was watching serial overnight.
+  if (const uint32_t stuckCount = powerManager.stuckReleaseCount(); stuckCount > 0) {
+    LOG_ERR("MAIN", "Power-button release wait timed out %lu time(s) since last power loss",
+            static_cast<unsigned long>(stuckCount));
+  }
 
   // SD Card Initialization
   // We need 6 open files concurrently when parsing a new chapter
@@ -473,10 +480,11 @@ void setup() {
       // Paired with the "Pre-sleep voltage" log in enterDeepSleep(): a verified
       // real wake (not a rejected/retried one) gets its own forced, uncached
       // read, so the two log lines bracket an exact sleep interval with real
-      // voltages instead of a percentage read off the screen later.
+      // voltages instead of a percentage read off the screen later. Gauge
+      // register read, same as the pre-sleep side -- see that comment.
       if (BoardConfig::isLilyGoT5_47()) {
-        uint16_t mv = 0;
-        if (freeink::ed047Tc1ReadBatteryMillivolts(mv)) {
+        const uint16_t mv = powerManager.readBatteryMillivoltsForced();
+        if (mv > 0) {
           LOG_INF("BAT", "Post-wake voltage: %u mV", mv);
         }
       }

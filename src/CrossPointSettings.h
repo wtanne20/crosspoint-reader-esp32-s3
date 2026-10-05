@@ -129,6 +129,29 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
     REFRESH_FREQUENCY_COUNT
   };
 
+  // LILYGO_T5_47 only (BoardConfig::isLilyGoT5_47()): how many consecutive
+  // fast/diff menu redraws happen before the driver forces a full clean.
+  // See Ed047Tc1Driver.cpp's kMaxConsecutiveDiffDraws comment -- menu screens
+  // never request a real Full refresh, so this is their only ghost cleanup.
+  enum MENU_REFRESH_CLEAN_INTERVAL {
+    CLEAN_INTERVAL_4 = 0,
+    CLEAN_INTERVAL_8 = 1,
+    CLEAN_INTERVAL_12 = 2,
+    CLEAN_INTERVAL_20 = 3,
+    MENU_REFRESH_CLEAN_INTERVAL_COUNT
+  };
+
+  // LILYGO_T5_47 only: clear-cycle depth for a Full refresh (the "flashes"
+  // before a full refresh draws). 1 cycle is deliberately not offered here --
+  // already proven on this hardware to leave visible ghost residue (see
+  // Ed047Tc1Driver.cpp's display() comment).
+  enum FULL_REFRESH_DEPTH {
+    REFRESH_DEPTH_2 = 0,
+    REFRESH_DEPTH_3 = 1,
+    REFRESH_DEPTH_4 = 2,
+    FULL_REFRESH_DEPTH_COUNT
+  };
+
   // Short power button press actions
   enum SHORT_PWRBTN {
     IGNORE = 0,
@@ -240,10 +263,15 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   uint8_t fontPointSize = DEFAULT_FONT_POINT_SIZE;
   uint8_t lineSpacing = NORMAL;
   uint8_t paragraphAlignment = JUSTIFIED;
-  // Auto-sleep timeout setting (default 10 minutes). Legacy sleepTimeout enum values are migration-only.
-  uint8_t sleepTimeoutMinutes = 10;
+  // Auto-sleep timeout setting (default 5 minutes). Legacy sleepTimeout enum values are migration-only.
+  uint8_t sleepTimeoutMinutes = 5;
   // E-ink refresh frequency (default 15 pages)
   uint8_t refreshFrequency = REFRESH_15;
+  // LILYGO_T5_47 only -- see MENU_REFRESH_CLEAN_INTERVAL/FULL_REFRESH_DEPTH.
+  // Defaults match this board's existing shipped behavior (kMaxConsecutiveDiffDraws=8,
+  // 4-cycle Full clear), so updating firmware doesn't silently change anyone's experience.
+  uint8_t menuRefreshCleanInterval = CLEAN_INTERVAL_8;
+  uint8_t fullRefreshDepth = REFRESH_DEPTH_4;
   uint8_t hyphenationEnabled = 0;
 
   // Reader screen margin settings
@@ -381,6 +409,8 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   float getReaderLineCompression() const;
   unsigned long getSleepTimeoutMs() const;
   int getRefreshFrequency() const;
+  int getMenuRefreshCleanInterval() const;
+  int getFullRefreshDepth() const;
 };
 
 // Helper macro to access settings

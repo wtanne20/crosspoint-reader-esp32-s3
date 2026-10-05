@@ -246,6 +246,10 @@ void TxtReaderActivity::renderBook() {
     initializeReader(renderer);
   }
 
+  // Any indexing popup initializeReader() needed already happened above;
+  // this is the real content that follows -- see consumeBoardOpenFullRefresh().
+  consumeBoardOpenFullRefresh();
+
   if (pageOffsets.empty()) {
     renderer.clearScreen();
     renderer.drawCenteredText(UI_12_FONT_ID, 300, tr(STR_EMPTY_FILE), true, EpdFontFamily::BOLD);

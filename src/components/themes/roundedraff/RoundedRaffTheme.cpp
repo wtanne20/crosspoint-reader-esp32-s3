@@ -1,5 +1,6 @@
 #include "RoundedRaffTheme.h"
 
+#include <BoardConfig.h>
 #include <GfxRenderer.h>
 #include <HalGPIO.h>
 #include <HalStorage.h>
@@ -331,6 +332,15 @@ void RoundedRaffTheme::drawList(const GfxRenderer& renderer, Rect rect, int item
 void RoundedRaffTheme::drawButtonHints(GfxRenderer& renderer, const char* btn1, const char* btn2, const char* btn3,
                                        const char* btn4) const {
   if (gpio.hasTouch()) {
+    return;
+  }
+
+  if (BoardConfig::isLilyGoT5_47()) {
+    // This DIY build's 4 buttons are user-wired to whatever physical
+    // position was convenient, so a printed hint box never reliably lines
+    // up with them -- skip the hint column entirely (see LyraTheme's
+    // matching gate; this board's default theme is Lyra, but keep every
+    // theme consistent in case that setting changes).
     return;
   }
 

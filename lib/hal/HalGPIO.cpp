@@ -203,6 +203,11 @@ bool HalGPIO::hasEdgeSideButtons() const {
          BoardConfig::ACTIVE.board == BoardConfig::Board::XteinkX4Pro;
 }
 
+bool HalGPIO::hasSideButtons() const {
+  return BoardConfig::ACTIVE.input.up != BoardConfig::PIN_UNASSIGNED ||
+         BoardConfig::ACTIVE.input.down != BoardConfig::PIN_UNASSIGNED;
+}
+
 bool HalGPIO::isXteinkDevice() const {
   return BoardConfig::ACTIVE.board == BoardConfig::Board::XteinkX3 ||
          BoardConfig::ACTIVE.board == BoardConfig::Board::XteinkX3Uc8279 ||

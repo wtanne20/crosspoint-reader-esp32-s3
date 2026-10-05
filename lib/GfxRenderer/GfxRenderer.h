@@ -45,6 +45,10 @@ class GfxRenderer {
   RenderMode renderMode;
   Orientation orientation;
   bool fadingFix;
+  // One-shot override consumed by the next displayBuffer()/displayBufferAsync()/
+  // displayGrayscaleBase() call; see requestFullRefreshOnNextDisplay().
+  mutable bool pendingForcedFullRefresh = false;
+  HalDisplay::RefreshMode resolveForcedRefreshMode(HalDisplay::RefreshMode requested) const;
   uint8_t* frameBuffer = nullptr;
   uint16_t panelWidth = HalDisplay::DISPLAY_WIDTH;
   uint16_t panelHeight = HalDisplay::DISPLAY_HEIGHT;
@@ -182,6 +186,13 @@ class GfxRenderer {
   // Fading fix control
   void setFadingFix(const bool enabled) { fadingFix = enabled; }
 
+  // Forces the next displayBuffer()/displayBufferAsync()/displayGrayscaleBase()
+  // call to use HalDisplay::FULL_REFRESH regardless of the mode it's called
+  // with, then clears itself. For callers that need a guaranteed full-panel
+  // clean at one specific moment (e.g. opening a book, waking from sleep)
+  // without changing that display call's own refresh-cadence logic.
+  void requestFullRefreshOnNextDisplay() const { pendingForcedFullRefresh = true; }
+
   // Screen ops
   int getScreenWidth() const;
   int getScreenHeight() const;
@@ -247,9 +258,15 @@ class GfxRenderer {
                        bool roundBottomLeft, bool roundBottomRight, Color color) const;
   void drawImage(const uint8_t bitmap[], int x, int y, int width, int height) const;
   void drawIcon(const uint8_t bitmap[], int x, int y, int size) const;
-  void drawBitmap(const Bitmap& bitmap, int x, int y, int maxWidth, int maxHeight, float cropX = 0,
-                  float cropY = 0) const;
-  void drawBitmap1Bit(const Bitmap& bitmap, int x, int y, int maxWidth, int maxHeight) const;
+  // allowUpscale: scale a source smaller than maxWidth/maxHeight up to cover
+  // it too, instead of only ever scaling down. Off by default -- callers like
+  // cover-art thumbnails want a small source left at native size, not blown
+  // up and blurred. Aspect ratio is always preserved (a single uniform
+  // scale) regardless of this flag.
+  void drawBitmap(const Bitmap& bitmap, int x, int y, int maxWidth, int maxHeight, float cropX = 0, float cropY = 0,
+                  bool allowUpscale = false) const;
+  void drawBitmap1Bit(const Bitmap& bitmap, int x, int y, int maxWidth, int maxHeight,
+                      bool allowUpscale = false) const;
   // Counter-invert content images in the logical framebuffer so output-level
   // dark mode leaves their original polarity unchanged.
   void preserveImagePolarity(int x, int y, int width, int height) const;

@@ -65,6 +65,7 @@ void XtcReaderActivity::renderBook() {
     return;
   }
 
+  consumeBoardOpenFullRefresh();
   renderPage();
   saveProgress();
 }

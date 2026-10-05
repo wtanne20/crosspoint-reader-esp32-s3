@@ -1,5 +1,6 @@
 #include "ReaderActivity.h"
 
+#include <BoardConfig.h>
 #include <FsHelpers.h>
 #include <HalStorage.h>
 #include <Memory.h>
@@ -46,6 +47,12 @@ void ReaderActivity::applyInitialOrientation() { ReaderUtils::applyOrientation(r
 
 void ReaderActivity::disableFastInitialRefresh() { pagesUntilFullRefresh = 0; }
 
+void ReaderActivity::consumeBoardOpenFullRefresh() {
+  if (!pendingBoardOpenFullRefresh) return;
+  pendingBoardOpenFullRefresh = false;
+  renderer.requestFullRefreshOnNextDisplay();
+}
+
 void ReaderActivity::onEnter() {
   Activity::onEnter();
 
@@ -61,6 +68,19 @@ void ReaderActivity::onEnter() {
   if (!loadBook()) {
     finish();
     return;
+  }
+
+  if (BoardConfig::isLilyGoT5_47()) {
+    // This DIY build has no OEM stock firmware to keep refresh-cadence parity
+    // with, so unlike the rest of the reader's HALF-only "clean" cadence
+    // (ReaderUtils::displayWithRefreshCycle), it can afford a genuine full
+    // waveform right when a book is opened or resumed to guarantee a
+    // ghost-free first page. Deferred to consumeBoardOpenFullRefresh() --
+    // see its comment and pendingBoardOpenFullRefresh's -- rather than
+    // requested immediately here, since loadBook() may still be about to
+    // show one or more indexing/build popups for a fresh book, and this
+    // should land on the real first page, not one of those.
+    pendingBoardOpenFullRefresh = true;
   }
 
   APP_STATE.openEpubPath = bookPath;

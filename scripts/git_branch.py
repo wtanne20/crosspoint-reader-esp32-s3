@@ -79,7 +79,9 @@ def get_base_version(project_dir):
 def inject_version(env):
     # Only applies to development environments; release envs set the
     # version via build_flags in platformio.ini and are unaffected.
-    if env['PIOENV'] not in ('default', 'sticky'):
+    # NOTE: x4pro/papermono's dev envs have this same gap (not fixed here —
+    # out of scope for the t5_47 board-support change that added this line).
+    if env['PIOENV'] not in ('default', 'sticky', 't5_47'):
         return
 
     project_dir = env['PROJECT_DIR']

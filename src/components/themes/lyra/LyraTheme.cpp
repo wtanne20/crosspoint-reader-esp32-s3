@@ -1,5 +1,6 @@
 #include "LyraTheme.h"
 
+#include <BoardConfig.h>
 #include <GfxRenderer.h>
 #include <HalGPIO.h>
 #include <HalPowerManager.h>
@@ -302,6 +303,15 @@ void LyraTheme::drawButtonHints(GfxRenderer& renderer, const char* btn1, const c
     return;
   }
 
+  if (BoardConfig::isLilyGoT5_47()) {
+    // This DIY build's 4 buttons are user-wired to whatever physical
+    // position was convenient, so a printed hint box never reliably lines
+    // up with them -- skip the hint column entirely and let content use the
+    // full screen (see BoardConfig::kLilyGoT5_47ButtonColumnReserve, which
+    // reserves zero width for this board).
+    return;
+  }
+
   const GfxRenderer::Orientation orig_orientation = renderer.getOrientation();
   renderer.setOrientation(GfxRenderer::Orientation::Portrait);
 
@@ -311,12 +321,13 @@ void LyraTheme::drawButtonHints(GfxRenderer& renderer, const char* btn1, const c
   constexpr int buttonHeight = LyraMetrics::values.buttonHintsHeight;
   constexpr int buttonY = LyraMetrics::values.buttonHintsHeight;  // Distance from bottom
   constexpr int textYOffset = 7;                                  // Distance from top of button to text baseline
+  const char* labels[] = {btn1, btn2, btn3, btn4};
+
   // Keyed to the portrait panel width: the 528-wide X3 gets more spacing than
   // the 480-wide boards (X4, X4 Pro, and the other 800x480 panels).
   constexpr int narrowButtonPositions[] = {58, 146, 254, 342};
   constexpr int wideButtonPositions[] = {65, 157, 291, 383};
   const int* buttonPositions = renderer.getScreenWidth() >= 528 ? wideButtonPositions : narrowButtonPositions;
-  const char* labels[] = {btn1, btn2, btn3, btn4};
 
   for (int i = 0; i < 4; i++) {
     const int x = buttonPositions[i];
@@ -340,7 +351,7 @@ void LyraTheme::drawButtonHints(GfxRenderer& renderer, const char* btn1, const c
 }
 
 void LyraTheme::drawSideButtonHints(const GfxRenderer& renderer, const char* topBtn, const char* bottomBtn) const {
-  if (gpio.hasTouch()) {
+  if (gpio.hasTouch() || !gpio.hasSideButtons()) {
     return;
   }
 

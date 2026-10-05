@@ -1340,11 +1340,11 @@ void GfxRenderer::drawIcon(const uint8_t bitmap[], const int x, const int y, con
 }
 
 void GfxRenderer::drawBitmap(const Bitmap& bitmap, const int x, const int y, const int maxWidth, const int maxHeight,
-                             const float cropX, const float cropY) const {
+                             const float cropX, const float cropY, const bool allowUpscale) const {
   if (fontCacheManager_ && fontCacheManager_->isScanning()) return;
   // For 1-bit bitmaps, use optimized 1-bit rendering path (no crop support for 1-bit)
   if (bitmap.is1Bit() && cropX == 0.0f && cropY == 0.0f) {
-    drawBitmap1Bit(bitmap, x, y, maxWidth, maxHeight);
+    drawBitmap1Bit(bitmap, x, y, maxWidth, maxHeight, allowUpscale);
     return;
   }
 
@@ -1371,7 +1371,7 @@ void GfxRenderer::drawBitmap(const Bitmap& bitmap, const int x, const int y, con
     hasTargetBounds = true;
   }
 
-  if (hasTargetBounds && fitScale < 1.0f) {
+  if (hasTargetBounds && (fitScale < 1.0f || (allowUpscale && fitScale > 1.0f))) {
     scale = fitScale;
     isScaled = true;
   }
@@ -1454,15 +1454,22 @@ void GfxRenderer::drawBitmap(const Bitmap& bitmap, const int x, const int y, con
 }
 
 void GfxRenderer::drawBitmap1Bit(const Bitmap& bitmap, const int x, const int y, const int maxWidth,
-                                 const int maxHeight) const {
+                                 const int maxHeight, const bool allowUpscale) const {
   float scale = 1.0f;
   bool isScaled = false;
-  if (maxWidth > 0 && bitmap.getWidth() > maxWidth) {
-    scale = static_cast<float>(maxWidth) / static_cast<float>(bitmap.getWidth());
-    isScaled = true;
+  bool hasTargetBounds = false;
+  float fitScale = 1.0f;
+  if (maxWidth > 0 && bitmap.getWidth() > 0) {
+    fitScale = static_cast<float>(maxWidth) / static_cast<float>(bitmap.getWidth());
+    hasTargetBounds = true;
   }
-  if (maxHeight > 0 && bitmap.getHeight() > maxHeight) {
-    scale = std::min(scale, static_cast<float>(maxHeight) / static_cast<float>(bitmap.getHeight()));
+  if (maxHeight > 0 && bitmap.getHeight() > 0) {
+    const float heightScale = static_cast<float>(maxHeight) / static_cast<float>(bitmap.getHeight());
+    fitScale = hasTargetBounds ? std::min(fitScale, heightScale) : heightScale;
+    hasTargetBounds = true;
+  }
+  if (hasTargetBounds && (fitScale < 1.0f || (allowUpscale && fitScale > 1.0f))) {
+    scale = fitScale;
     isScaled = true;
   }
 
@@ -1673,20 +1680,27 @@ void GfxRenderer::invertScreen() const {
   }
 }
 
+HalDisplay::RefreshMode GfxRenderer::resolveForcedRefreshMode(const HalDisplay::RefreshMode requested) const {
+  if (!pendingForcedFullRefresh) return requested;
+  pendingForcedFullRefresh = false;
+  return HalDisplay::FULL_REFRESH;
+}
+
 void GfxRenderer::displayBuffer(const HalDisplay::RefreshMode refreshMode) const {
   auto elapsed = millis() - start_ms;
   LOG_DBG("GFX", "Time = %lu ms from clearScreen to displayBuffer", elapsed);
-  display.displayBuffer(refreshMode, fadingFix);
+  display.displayBuffer(resolveForcedRefreshMode(refreshMode), fadingFix);
 }
 
 void GfxRenderer::displayBufferAsync(const HalDisplay::RefreshMode refreshMode) const {
+  const auto mode = resolveForcedRefreshMode(refreshMode);
   // The async path has no turn-off-screen hook, which the sunlight fading fix
   // relies on; keep those users on the blocking path.
   if (fadingFix) {
-    display.displayBuffer(refreshMode, fadingFix);
+    display.displayBuffer(mode, fadingFix);
     return;
   }
-  display.displayBufferAsync(refreshMode);
+  display.displayBufferAsync(mode);
 }
 
 void GfxRenderer::waitRefreshComplete() const { display.waitRefreshComplete(); }
@@ -2193,7 +2207,7 @@ size_t GfxRenderer::getBufferSize() const { return frameBufferSize; }
 // void GfxRenderer::grayscaleRevert() const { display.grayscaleRevert(); }
 
 void GfxRenderer::displayGrayscaleBase(HalDisplay::RefreshMode fallback) const {
-  display.displayGrayscaleBase(fallback, fadingFix);
+  display.displayGrayscaleBase(resolveForcedRefreshMode(fallback), fadingFix);
 }
 
 void GfxRenderer::preconditionGrayscale() const { display.preconditionGrayscale(); }

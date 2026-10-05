@@ -124,7 +124,12 @@ BitmapPlacement calculateBitmapPlacement(const int bitmapWidth, const int bitmap
   const auto pageWidth = renderer.getScreenWidth();
   const auto pageHeight = renderer.getScreenHeight();
 
-  if (bitmapWidth > pageWidth || bitmapHeight > pageHeight) {
+  // Always compute the fit/crop math, even when the source is smaller than
+  // the screen in both dimensions -- Fit and Crop reconcile the source's
+  // aspect ratio against the screen's either way, not just shrink an
+  // oversized source. GfxRenderer::drawBitmap's allowUpscale (passed by this
+  // screen's callers) does the matching upscale for this placement.
+  if (bitmapWidth != pageWidth || bitmapHeight != pageHeight) {
     float ratio = static_cast<float>(bitmapWidth) / static_cast<float>(bitmapHeight);
     const float screenRatio = static_cast<float>(pageWidth) / static_cast<float>(pageHeight);
 
@@ -397,13 +402,19 @@ bool findNextValidSleepImage(HalFile& dir, const SleepRecentKind recentKind, cha
       continue;
     }
 
-    const bool isValid = isBmp ? [&dirFile]() {
+    BmpReaderError bmpErr = BmpReaderError::Ok;
+    const bool isValid = isBmp ? [&dirFile, &bmpErr]() {
       Bitmap bitmap(dirFile);
-      return bitmap.parseHeaders() == BmpReaderError::Ok;
+      bmpErr = bitmap.parseHeaders();
+      return bmpErr == BmpReaderError::Ok;
     }()
                                : isValidPngHeader(dirFile);
     if (!isValid) {
-      LOG_DBG("SLP", "Skipping invalid sleep image: %s", name);
+      if (isBmp) {
+        LOG_DBG("SLP", "Skipping invalid sleep image: %s (%s)", name, Bitmap::errorToString(bmpErr));
+      } else {
+        LOG_DBG("SLP", "Skipping invalid sleep image: %s", name);
+      }
       continue;
     }
     return true;
@@ -626,7 +637,7 @@ void SleepActivity::renderBitmapSleepScreen(const Bitmap& bitmap, const bool pre
       bitmap.hasGreyscale() && (preserveBackground || SETTINGS.sleepScreenCoverFilter ==
                                                           CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::NO_FILTER);
 
-  renderer.drawBitmap(bitmap, x, y, pageWidth, pageHeight, cropX, cropY);
+  renderer.drawBitmap(bitmap, x, y, pageWidth, pageHeight, cropX, cropY, /*allowUpscale=*/true);
 
   if (!preserveBackground &&
       SETTINGS.sleepScreenCoverFilter == CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::INVERTED_BLACK_AND_WHITE) {
@@ -647,13 +658,13 @@ void SleepActivity::renderBitmapSleepScreen(const Bitmap& bitmap, const bool pre
     bitmap.rewindToData();
     renderer.clearScreen(0x00);
     renderer.setRenderMode(GfxRenderer::GRAYSCALE_LSB);
-    renderer.drawBitmap(bitmap, x, y, pageWidth, pageHeight, cropX, cropY);
+    renderer.drawBitmap(bitmap, x, y, pageWidth, pageHeight, cropX, cropY, /*allowUpscale=*/true);
     renderer.copyGrayscaleLsbBuffers();
 
     bitmap.rewindToData();
     renderer.clearScreen(0x00);
     renderer.setRenderMode(GfxRenderer::GRAYSCALE_MSB);
-    renderer.drawBitmap(bitmap, x, y, pageWidth, pageHeight, cropX, cropY);
+    renderer.drawBitmap(bitmap, x, y, pageWidth, pageHeight, cropX, cropY, /*allowUpscale=*/true);
     renderer.copyGrayscaleMsbBuffers();
 
     renderer.displayGrayBuffer();

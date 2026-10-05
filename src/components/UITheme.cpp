@@ -1,5 +1,6 @@
 #include "UITheme.h"
 
+#include <BoardConfig.h>
 #include <FsHelpers.h>
 #include <GfxRenderer.h>
 #include <HalGPIO.h>
@@ -62,6 +63,13 @@ const ThemeMetrics& UITheme::getMetrics() const {
     if (touch) {
       adjustedMetrics.buttonHintsHeight = 0;
     }
+    if (BoardConfig::isLilyGoT5_47()) {
+      // This board draws no button-hint UI at all (LyraTheme::drawButtonHints
+      // early-returns for it) -- menu content needs no bottom or right
+      // clearance for hints. kLilyGoT5_47ButtonColumnReserve is 0.
+      adjustedMetrics.buttonHintsHeight = 0;
+      adjustedMetrics.buttonHintsRightWidth = BoardConfig::kLilyGoT5_47ButtonColumnReserve;
+    }
     metricsForTouch = touch;
     metricsValid = true;
   }
@@ -98,6 +106,7 @@ Rect UITheme::getScreenSafeArea(const GfxRenderer& renderer, bool hasFrontButton
     case GfxRenderer::Orientation::Portrait:
       if (hasFrontButtonHints) {
         safeArea.height -= metrics.buttonHintsHeight;
+        safeArea.width -= metrics.buttonHintsRightWidth;
       }
       break;
     case GfxRenderer::Orientation::LandscapeClockwise:

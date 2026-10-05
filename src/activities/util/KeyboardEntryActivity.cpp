@@ -213,6 +213,27 @@ void KeyboardEntryActivity::moveSelectionCol(const int delta) {
   if (selRow < 0 || selRow >= layout.rowCount) return;
   const int cols = layout.rows[selRow].count;
   if (cols <= 0) return;
+  if (!gpio.hasSideButtons()) {
+    // No Up/Down on this board (e.g. LILYGO_T5_47) means moveSelectionRow()
+    // is unreachable, so every key past row 0 would otherwise be permanently
+    // unreachable. Spill Left/Right across row boundaries instead of
+    // wrapping in place, turning the whole keyboard into one Left/Right-
+    // traversable sequence. Every other board keeps the original in-row
+    // wrap (see the SDK's documented model, keyboard.h:192-236) -- Up/Down
+    // stays the fast way to jump rows there.
+    const int next = selCol + delta;
+    if (next < 0) {
+      moveSelectionRow(-1);
+      const int newCols = layout.rows[selRow].count;
+      selCol = newCols > 0 ? newCols - 1 : 0;
+    } else if (next >= cols) {
+      moveSelectionRow(1);
+      selCol = 0;
+    } else {
+      selCol = next;
+    }
+    return;
+  }
   selCol = (selCol + delta + cols) % cols;
 }
 

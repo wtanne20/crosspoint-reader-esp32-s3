@@ -1,5 +1,6 @@
 #include "BaseTheme.h"
 
+#include <BoardConfig.h>
 #include <FreeInkUIGfxRenderer.h>
 #include <GfxRenderer.h>
 #include <HalClock.h>
@@ -173,6 +174,15 @@ void BaseTheme::drawButtonHints(GfxRenderer& renderer, const char* btn1, const c
     return;
   }
 
+  if (BoardConfig::isLilyGoT5_47()) {
+    // This DIY build's 4 buttons are user-wired to whatever physical
+    // position was convenient, so a printed hint box never reliably lines
+    // up with them -- skip the hint column entirely (see LyraTheme's
+    // matching gate; this board's default theme is Lyra, but keep every
+    // theme consistent in case that setting changes).
+    return;
+  }
+
   const GfxRenderer::Orientation orig_orientation = renderer.getOrientation();
   renderer.setOrientation(GfxRenderer::Orientation::Portrait);
 
@@ -203,7 +213,7 @@ void BaseTheme::drawButtonHints(GfxRenderer& renderer, const char* btn1, const c
 }
 
 void BaseTheme::drawSideButtonHints(const GfxRenderer& renderer, const char* topBtn, const char* bottomBtn) const {
-  if (gpio.hasTouch()) {
+  if (gpio.hasTouch() || !gpio.hasSideButtons()) {
     return;
   }
 
@@ -397,7 +407,16 @@ void BaseTheme::drawHeader(const GfxRenderer& renderer, Rect rect, const char* t
   // subtitles.
   ui.target.setFont(fui::GfxRendererTarget::FONT_SMALL, SMALL_FONT_ID);
   const ThemeMetrics& metrics = UITheme::getInstance().getMetrics();
-  const fui::Rect band{static_cast<int16_t>(rect.x), static_cast<int16_t>(rect.y), static_cast<int16_t>(rect.width),
+  // Boards whose button-hint column runs down the right edge (LyraTheme::
+  // drawButtonHints board-gate) need every header narrowed to match, so this
+  // is fixed once here instead of at each of the ~25 drawHeader call sites.
+  // Only while actually rendering in the same Portrait space that column
+  // occupies -- reader-menu headers can render in other orientations, where
+  // the column isn't on this edge.
+  const int16_t headerWidth = static_cast<int16_t>(
+      rect.width -
+      (renderer.getOrientation() == GfxRenderer::Orientation::Portrait ? metrics.buttonHintsRightWidth : 0));
+  const fui::Rect band{static_cast<int16_t>(rect.x), static_cast<int16_t>(rect.y), headerWidth,
                        static_cast<int16_t>(rect.height)};
 
   const bool showBatteryPercentage =
@@ -418,7 +437,12 @@ void BaseTheme::drawHeader(const GfxRenderer& renderer, Rect rect, const char* t
   fui::HeaderProps props;
   props.title = title;
   props.rightLabel = subtitle;  // firmware headers right-align the secondary text
-  const bool batteryLeft = metrics.headerBatterySide == 1;
+  // ThemeMetrics::headerBatterySide is shared by every board using this
+  // theme, so this DIY board's request to move the battery to the top-left
+  // (to clear the top-right corner for the new vertical button-hint column,
+  // see LyraTheme::drawButtonHints) is gated on the active board instead of
+  // flipping the shared metric, which would move it for other boards too.
+  const bool batteryLeft = metrics.headerBatterySide == 1 || BoardConfig::isLilyGoT5_47();
   const bool batteryDetached = metrics.headerBatteryDetached;
   // Shared-line headers with the battery on the right: the header component
   // places rightLabel inside the battery reserve, so it sits mid-band next to

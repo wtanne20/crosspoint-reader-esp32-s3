@@ -234,6 +234,20 @@ inline std::vector<SettingInfo> getSettingsList(const SdCardFontRegistry* regist
             StrId::STR_REFRESH_FREQ, &CrossPointSettings::refreshFrequency,
             {StrId::STR_PAGES_1, StrId::STR_PAGES_5, StrId::STR_PAGES_10, StrId::STR_PAGES_15, StrId::STR_PAGES_30},
             "refreshFrequency", StrId::STR_CAT_DISPLAY),
+#if FREEINK_DEVICE_LILYGO_T5_47
+        // This board's raw-panel driver (Ed047Tc1Driver) has no controller to
+        // offload partial/full refresh tiering to, so these two knobs are
+        // meaningless on every other board and compiled out for them. See
+        // Ed047Tc1Driver.cpp's kMaxConsecutiveDiffDraws/display() comments.
+        SettingInfo::Enum(StrId::STR_MENU_REFRESH_CLEAN_INTERVAL, &CrossPointSettings::menuRefreshCleanInterval,
+                          {StrId::STR_CLEAN_INTERVAL_4, StrId::STR_CLEAN_INTERVAL_8, StrId::STR_CLEAN_INTERVAL_12,
+                           StrId::STR_CLEAN_INTERVAL_20},
+                          "menuRefreshCleanInterval", StrId::STR_CAT_DISPLAY),
+        SettingInfo::Enum(
+            StrId::STR_FULL_REFRESH_DEPTH, &CrossPointSettings::fullRefreshDepth,
+            {StrId::STR_REFRESH_DEPTH_2, StrId::STR_REFRESH_DEPTH_3, StrId::STR_REFRESH_DEPTH_4},
+            "fullRefreshDepth", StrId::STR_CAT_DISPLAY),
+#endif
         SettingInfo::Enum(StrId::STR_UI_THEME, &CrossPointSettings::uiTheme,
                           {StrId::STR_THEME_CLASSIC, StrId::STR_THEME_LYRA, StrId::STR_THEME_LYRA_EXTENDED,
                            StrId::STR_THEME_ROUNDEDRAFF},

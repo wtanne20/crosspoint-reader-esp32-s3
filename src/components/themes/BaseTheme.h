@@ -80,6 +80,12 @@ struct ThemeMetrics {
 
   int buttonHintsHeight;
   int sideButtonHintsWidth;
+  // Extra right-edge content reserve for boards whose button-hint column
+  // lives on the right edge instead of the bottom row. Zero for every board
+  // by default; UITheme::getMetrics() sets it per-board (see
+  // BoardConfig::kLilyGoT5_47ButtonColumnReserve), not per-theme, so this
+  // default lets every existing ThemeMetrics::values initializer stay as-is.
+  int buttonHintsRightWidth = 0;
 
   int progressBarHeight;
   int progressBarMarginTop;

@@ -332,6 +332,32 @@ int CrossPointSettings::getRefreshFrequency() const {
   }
 }
 
+int CrossPointSettings::getMenuRefreshCleanInterval() const {
+  switch (menuRefreshCleanInterval) {
+    case CLEAN_INTERVAL_4:
+      return 4;
+    case CLEAN_INTERVAL_8:
+    default:
+      return 8;
+    case CLEAN_INTERVAL_12:
+      return 12;
+    case CLEAN_INTERVAL_20:
+      return 20;
+  }
+}
+
+int CrossPointSettings::getFullRefreshDepth() const {
+  switch (fullRefreshDepth) {
+    case REFRESH_DEPTH_2:
+      return 2;
+    case REFRESH_DEPTH_3:
+      return 3;
+    case REFRESH_DEPTH_4:
+    default:
+      return 4;
+  }
+}
+
 void CrossPointSettings::clearSdFontFamily() {
   sdFontFamilyName[0] = '\0';
   fontPointSize =

@@ -1362,6 +1362,11 @@ void EpubReaderActivity::rememberCurrentContentOffset() {
 void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int orientedMarginTop,
                                         const int orientedMarginRight, const int orientedMarginBottom,
                                         const int orientedMarginLeft) {
+  // Any indexing/build popups for this book open already happened in the
+  // caller (renderBook()); this is the real first page, the intended target
+  // of a board-open forced full refresh -- see consumeBoardOpenFullRefresh().
+  consumeBoardOpenFullRefresh();
+
   const auto t0 = millis();
   const int fontId = SETTINGS.getReaderFontId();
 

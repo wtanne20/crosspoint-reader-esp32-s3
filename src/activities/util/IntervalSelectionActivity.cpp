@@ -164,12 +164,16 @@ void IntervalSelectionActivity::buildIntervalScreen(UiScreen& screen) {
 
   // Step hints: front buttons do the small step, side buttons the large step. Built from
   // separate label + value strings (rather than splitting one localized sentence) so the layout
-  // doesn't depend on translators preserving a hidden separator.
+  // doesn't depend on translators preserving a hidden separator. Boards with no side/up-down
+  // buttons at all (e.g. LilyGo T5 4.7) skip the second line entirely rather than describing
+  // a button that doesn't exist on the hardware.
   char hints[2][64];
   char stepText[24];
   int hintIndex = 0;
+  const bool hasSideButtons = gpio.hasSideButtons();
   for (const auto& [labelId, step] :
        {std::pair{StrId::STR_STEP_HINT_FRONT, smallStep}, std::pair{StrId::STR_STEP_HINT_SIDE, largeStep}}) {
+    if (labelId == StrId::STR_STEP_HINT_SIDE && !hasSideButtons) continue;
     if (valueFormatId != StrId::STR_NONE_OPT) {
       snprintf(stepText, sizeof(stepText), I18N.get(valueFormatId), static_cast<unsigned int>(step));
     } else {
@@ -187,8 +191,8 @@ void IntervalSelectionActivity::buildIntervalScreen(UiScreen& screen) {
   spec.stepAction = ACTION_STEP;
   spec.cancelAction = ACTION_CANCEL;
   spec.okAction = ACTION_OK;
-  spec.hintLine1 = hints[0];
-  spec.hintLine2 = hints[1];
+  spec.hintLine1 = hintIndex > 0 ? hints[0] : nullptr;
+  spec.hintLine2 = hintIndex > 1 ? hints[1] : nullptr;
   buildSliderDialogScreen(screen, renderer, mappedInput, spec);
 }
 

@@ -13,6 +13,13 @@ class ReaderActivity : public Activity {
   std::string bookPath;
   int pagesUntilFullRefresh = 0;
   bool forcedRefreshPending = false;
+  // Set in onEnter() on boards that want a guaranteed full waveform on book
+  // open/resume (see consumeBoardOpenFullRefresh()). Deliberately not applied
+  // immediately: onEnter() runs before any indexing/build popups a fresh book
+  // may need, and forcing full refresh onto one of those transient popups
+  // instead of the real first page produces a multi-cycle clear-flash that
+  // reads as the screen "filling with gray" mid-index, not a crisp open.
+  bool pendingBoardOpenFullRefresh = false;
 
   std::unique_ptr<EndOfBookOptions> endOfBookOptions;
   std::atomic<bool> endOfBookOptionsReady{false};
@@ -40,6 +47,10 @@ class ReaderActivity : public Activity {
   bool handleEndOfBookPageTurn(bool prevTriggered, bool nextTriggered);
   void clearEndOfBookOptionsIfNeeded();
   void disableFastInitialRefresh();
+  // Call right before the real first page/content display of this book open
+  // -- after any indexing/build popups, never before them. No-op after the
+  // first call (or if onEnter() never set the flag).
+  void consumeBoardOpenFullRefresh();
 
  public:
   ~ReaderActivity() override = default;

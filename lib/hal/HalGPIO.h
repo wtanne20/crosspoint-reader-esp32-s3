@@ -66,6 +66,13 @@ class HalGPIO {
   // Keyed off the active BoardConfig profile, not the X3/X4 runtime detection.
   bool hasEdgeSideButtons() const;
 
+  // True when the board has a physical Up and/or Down button at all (side
+  // rocker or edge buttons). False for 4-button-only boards (e.g.
+  // LILYGO_T5_47 -- BoardConfig::ACTIVE.input.up/down are both
+  // PIN_UNASSIGNED), which need Up/Down-only interactions rerouted onto
+  // Back/Confirm/Left/Right instead of silently becoming unreachable.
+  bool hasSideButtons() const;
+
   // Start button GPIO and setup SPI for screen and SD card
   void begin();
 

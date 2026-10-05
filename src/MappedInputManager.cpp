@@ -104,10 +104,24 @@ bool MappedInputManager::mapButton(const Button button, bool (HalGPIO::*fn)(uint
     case Button::NavNext:
       // Logical "next item" navigation: side Down + front Right, with the control axis flipped in
       // INVERTED / LANDSCAPE_CCW (frontButtonFollowOrientation) so it matches the rotated hint labels.
+      if (BoardConfig::isLilyGoT5_47()) {
+        // This DIY build's front buttons run in a vertical column instead of
+        // a horizontal row, so the Down->Right pairing above doesn't track
+        // the physical layout: Right sits physically above Left (see
+        // LyraTheme::drawButtonHints' top-to-bottom order), so Right is
+        // "up"/previous and Left is "down"/next here -- the opposite of the
+        // row-layout default. Only affects menu list navigation; the
+        // reader's own page-turn buttons (ReaderUtils::detectPageTurn) still
+        // read Left=prev/Right=next unchanged.
+        return isNavDirectionSwapped() ? mapButton(Button::Right, fn) : mapButton(Button::Left, fn);
+      }
       return isNavDirectionSwapped() ? (mapButton(Button::Up, fn) || mapButton(Button::Left, fn))
                                      : (mapButton(Button::Down, fn) || mapButton(Button::Right, fn));
     case Button::NavPrevious:
       // Logical "previous item" navigation: side Up + front Left, axis-flipped in the same orientations.
+      if (BoardConfig::isLilyGoT5_47()) {
+        return isNavDirectionSwapped() ? mapButton(Button::Left, fn) : mapButton(Button::Right, fn);
+      }
       return isNavDirectionSwapped() ? (mapButton(Button::Down, fn) || mapButton(Button::Right, fn))
                                      : (mapButton(Button::Up, fn) || mapButton(Button::Left, fn));
     case Button::ScreenLeft:

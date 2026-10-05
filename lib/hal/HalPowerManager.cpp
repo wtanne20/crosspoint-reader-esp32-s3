@@ -4,6 +4,7 @@
 #include <Logging.h>
 #include <PowerManager.h>
 #include <WiFi.h>
+#include <driver/gpio.h>
 #include <esp_sleep.h>
 #include <soc/soc_caps.h>
 
@@ -13,6 +14,9 @@
 
 #if FREEINK_DEVICE_PAPERMONO
 #include <M5Pm1.h>
+#endif
+#if FREEINK_DEVICE_LILYGO_T5_47
+#include <BoardT5_47.h>
 #endif
 
 HalPowerManager powerManager;  // Singleton instance
@@ -67,6 +71,12 @@ void HalPowerManager::setPowerSaving(bool enabled) {
 }
 
 void HalPowerManager::startDeepSleep(HalGPIO& gpio) const {
+#if FREEINK_DEVICE_LILYGO_T5_47
+  // Belt and braces with lightSleepIfIdle()'s own cleanup: only the power-button
+  // ext1 source (armed below) may wake deep sleep.
+  esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_TIMER);
+  esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_GPIO);
+#endif
 #ifdef ENABLE_SERIAL_LOG
   // Tear down HWCDC so the host sees a clean disconnect and the peripheral
   // doesn't hold power domains that interfere with USB-powered GPIO wake.
@@ -112,7 +122,61 @@ void HalPowerManager::startDeepSleep(HalGPIO& gpio) const {
   freeink::PowerManager::deepSleepUntilPowerButton();
 }
 
+bool HalPowerManager::lightSleepIfIdle() {
+#if FREEINK_DEVICE_LILYGO_T5_47
+  // Scoped to this board only: it has no WiFi-adjacent background tasks, no
+  // touch/tilt/gauge peripheral that needs periodic servicing, and no PMIC --
+  // every button (back/confirm/left/right/power) is a plain active-low GPIO
+  // (see BoardConfig.h's LILYGO_T5_47 profile), which is all light-sleep GPIO
+  // wakeup needs. Other boards would each need their own review before this
+  // is safe for them, so this deliberately isn't a generic PowerManager path.
+  if (!BoardConfig::isLilyGoT5_47()) return false;
+  if (WiFi.getMode() != WIFI_MODE_NULL) return false;  // radio needs the CPU awake to service it
+  if (Serial) return false;  // a monitor is attached -- don't delay serial command handling
+
+  static bool wakeSourcesArmed = false;
+  if (!wakeSourcesArmed) {
+    const auto& in = BoardConfig::ACTIVE.input;
+    const int8_t pins[] = {in.back, in.confirm, in.left, in.right, in.power};
+    for (int8_t pin : pins) {
+      if (pin == BoardConfig::PIN_UNASSIGNED) continue;
+      // All active-low with an internal pull-up on this board (see
+      // InputManager::begin()'s pinMode calls) -- pressed reads LOW.
+      gpio_wakeup_enable(static_cast<gpio_num_t>(pin), GPIO_INTR_LOW_LEVEL);
+    }
+    esp_sleep_enable_gpio_wakeup();
+    wakeSourcesArmed = true;
+  }
+
+  // Bounded even with no button press, so loop() still services the
+  // auto-sleep timeout and periodic heap logging while otherwise idle.
+  esp_sleep_enable_gpio_wakeup();
+  esp_sleep_enable_timer_wakeup(200000);  // 200ms, in microseconds
+  esp_light_sleep_start();
+  // Disarm both: wake sources persist until cleared, and a leftover 200ms timer
+  // would carry into the next deep sleep and reboot the device every 200ms.
+  esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_TIMER);
+  esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_GPIO);
+  return true;
+#else
+  return false;
+#endif
+}
+
 uint16_t HalPowerManager::getBatteryPercentage() const {
+#if FREEINK_DEVICE_LILYGO_T5_47
+  // This board's battery-sense divider rides the EPD boost rail (see
+  // Ed047Tc1Battery.h) — a plain, unthrottled ADC poll would cycle panel
+  // power on every call. BoardT5_47::readBatteryPercent() throttles and
+  // caches internally; skip the generic ADC/EMA path below entirely.
+  // Gated on batteryGauge.gaugeAddr == 0 (not just the board check) so this
+  // automatically steps aside the moment BoardConfig.h's LC709203F gauge
+  // config is live, instead of silently shadowing it like it did the last
+  // time both were toggled independently.
+  if (BoardConfig::isLilyGoT5_47() && BoardConfig::ACTIVE.batteryGauge.gaugeAddr == 0) {
+    return BoardT5_47::readBatteryPercent();
+  }
+#endif
   static const BatteryMonitor battery;
   if (BoardConfig::ACTIVE.batteryGauge.gaugeAddr != 0) {
     const unsigned long now = millis();

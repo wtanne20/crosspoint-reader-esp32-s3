@@ -42,6 +42,15 @@ class HalPowerManager {
   // Should be called inside main loop() to handle the currentLockMode
   void startDeepSleep(HalGPIO& gpio) const;
 
+  // LilyGo T5 4.7 only (see .cpp): replaces the idle-branch delay(50) with a
+  // real ESP32 light sleep, waking instantly on any front/power button or a
+  // bounded timer. Returns false (caller should delay() as before) when any
+  // safety gate fails -- every other board, WiFi active, or a serial monitor
+  // attached. Distinct from, and doesn't touch, the deep-sleep button-hold
+  // wake path (verifyPowerButtonWakeup()/armPowerButtonWakeup()) -- this only
+  // covers pauses between actions while the device is already awake.
+  bool lightSleepIfIdle();
+
   // Get battery percentage (range 0-100)
   uint16_t getBatteryPercentage() const;
 

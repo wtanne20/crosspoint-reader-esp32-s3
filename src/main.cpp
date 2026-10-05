@@ -1,5 +1,9 @@
 #include <Arduino.h>
 #include <BoardConfig.h>
+#include <Ed047Tc1RefreshTuning.h>
+#if FREEINK_DEVICE_LILYGO_T5_47
+#include <Ed047Tc1Battery.h>
+#endif
 #include <Epub.h>
 #include <FontCacheManager.h>
 #include <FontDecompressor.h>
@@ -248,14 +252,17 @@ static bool loadSleepFrameBuffer() {
 }
 
 // Enter deep sleep mode
-void enterDeepSleep(bool fromTimeout = false) {
+// lowBattery: leave the "Low Power, Please Charge" message on the panel instead of
+// the configured sleep screen (an e-paper keeps it with no power), then sleep.
+void enterDeepSleep(bool fromTimeout = false, bool lowBattery = false) {
   HalPowerManager::Lock powerLock;  // Ensure we are at normal CPU frequency for sleep preparation
   APP_STATE.lastSleepFromReader = activityManager.isReaderActivity();
 
   const bool isQuickResumeSleep =
-      SETTINGS.sleepScreen == CrossPointSettings::SLEEP_SCREEN_MODE::QUICK_RESUME ||
-      (fromTimeout &&
-       SETTINGS.quickResumeSleepScreen == CrossPointSettings::QUICK_RESUME_SLEEP_SCREEN::QUICK_RESUME_AFTER_TIMEOUT);
+      !lowBattery &&
+      (SETTINGS.sleepScreen == CrossPointSettings::SLEEP_SCREEN_MODE::QUICK_RESUME ||
+       (fromTimeout && SETTINGS.quickResumeSleepScreen ==
+                           CrossPointSettings::QUICK_RESUME_SLEEP_SCREEN::QUICK_RESUME_AFTER_TIMEOUT));
   // Every sleep mode leaves a complete retained frame on the e-ink panel. Keep
   // it visible until the first useful reader or home paint replaces it.
   APP_STATE.showBootScreen = false;
@@ -265,7 +272,14 @@ void enterDeepSleep(bool fromTimeout = false) {
   // Commit to sleeping before goToSleep() runs the outgoing activity's onExit():
   // a WiFi activity would otherwise silentRestart() here and reboot instead.
   deepSleepInProgress = true;
-  activityManager.goToSleep(fromTimeout);
+  if (lowBattery) {
+    // Same shape as goToSleep(): replace the activity (running its onExit) and
+    // pump the loop so the message is drawn before we power down.
+    activityManager.goToFullScreenMessage(tr(STR_LOW_POWER_CHARGE), EpdFontFamily::BOLD);
+    activityManager.loop();
+  } else {
+    activityManager.goToSleep(fromTimeout);
+  }
 
   if (isQuickResumeSleep) {
     saveSleepFrameBuffer();
@@ -280,6 +294,19 @@ void enterDeepSleep(bool fromTimeout = false) {
     WiFi.disconnect(true);
     WiFi.mode(WIFI_OFF);
   }
+
+#if FREEINK_DEVICE_LILYGO_T5_47
+  // Forced, uncached read (bypasses BoardT5_47's 5-min cache) right at the
+  // sleep/wake boundary, so an overnight drain question has an exact voltage
+  // pinned to a precise time instead of a percentage read off the screen at
+  // whatever moment the user happened to look.
+  if (BoardConfig::isLilyGoT5_47()) {
+    uint16_t mv = 0;
+    if (freeink::ed047Tc1ReadBatteryMillivolts(mv)) {
+      LOG_INF("BAT", "Pre-sleep voltage: %u mV", mv);
+    }
+  }
+#endif
 
   halTiltSensor.deepSleep();
   display.deepSleep();
@@ -384,10 +411,19 @@ void setup() {
       delay(10);
     }
 
-    const uint8_t recoveryButton = BoardConfig::isX4Pro() ? HalGPIO::BTN_DOWN : HalGPIO::BTN_UP;
-    if (gpio.isPressed(recoveryButton)) {
+    if (gpio.hasSideButtons()) {
+      const uint8_t recoveryButton = BoardConfig::isX4Pro() ? HalGPIO::BTN_DOWN : HalGPIO::BTN_UP;
+      if (gpio.isPressed(recoveryButton)) {
+        recoveryFirmwareMode = true;
+        LOG_INF("MAIN", "Recovery firmware mode (%s + POWER held at boot)", BoardConfig::isX4Pro() ? "DOWN" : "UP");
+      }
+    } else if (gpio.isPressed(HalGPIO::BTN_BACK) && gpio.isPressed(HalGPIO::BTN_CONFIRM)) {
+      // No Up/Down on this board (e.g. LILYGO_T5_47) -- BTN_UP can never
+      // fire, which would make recovery mode permanently unreachable. Back+
+      // Confirm are guaranteed to exist on every board's InputPins and are
+      // unlikely to be held together by accident.
       recoveryFirmwareMode = true;
-      LOG_INF("MAIN", "Recovery firmware mode (%s + POWER held at boot)", BoardConfig::isX4Pro() ? "DOWN" : "UP");
+      LOG_INF("MAIN", "Recovery firmware mode (BACK+CONFIRM + POWER held at boot)");
     }
   }
 
@@ -396,6 +432,9 @@ void setup() {
 #else
   LOG_INF("MAIN", "Device: %s", BoardConfig::ACTIVE.name);
 #endif
+  LOG_INF("MAIN", "Boot: reset reason %d, wake cause %d, wake reason %d, ext1 pins 0x%llx",
+          static_cast<int>(esp_reset_reason()), static_cast<int>(esp_sleep_get_wakeup_cause()),
+          static_cast<int>(wakeupReason), static_cast<unsigned long long>(esp_sleep_get_ext1_wakeup_status()));
 
   // SD Card Initialization
   // We need 6 open files concurrently when parsing a new chapter
@@ -430,6 +469,18 @@ void setup() {
                                         SETTINGS.shortPwrBtn == CrossPointSettings::SHORT_PWRBTN::SLEEP)) {
         powerManager.startDeepSleep(gpio);
       }
+#if FREEINK_DEVICE_LILYGO_T5_47
+      // Paired with the "Pre-sleep voltage" log in enterDeepSleep(): a verified
+      // real wake (not a rejected/retried one) gets its own forced, uncached
+      // read, so the two log lines bracket an exact sleep interval with real
+      // voltages instead of a percentage read off the screen later.
+      if (BoardConfig::isLilyGoT5_47()) {
+        uint16_t mv = 0;
+        if (freeink::ed047Tc1ReadBatteryMillivolts(mv)) {
+          LOG_INF("BAT", "Post-wake voltage: %u mV", mv);
+        }
+      }
+#endif
       wakePowerReleasePending = true;
       break;
     case HalGPIO::WakeupReason::AfterUSBPower:
@@ -498,6 +549,16 @@ void setup() {
       } else {
         // The first Home/Reader paint is followed by an explicit clean refresh
         // because the panel still physically shows the sleep image.
+        //
+        // Deliberately NOT forcing FULL_REFRESH here on LILYGO_T5_47: unlike
+        // most panels, Ed047Tc1Driver's Full mode always does a separate
+        // multi-cycle clear pass before the content draw, a visible "flash to
+        // blank, then the page pops in" two-step instead of one smooth
+        // transition (see SleepActivity::onEnter()'s matching comment, found
+        // after this exact change produced that artifact on the sleep
+        // screen). needsWakeRefresh's HALF_REFRESH below already gets a
+        // clean, ghost-free single-stage transition via that driver's
+        // differential path.
         needsWakeRefresh = true;
       }
       break;
@@ -568,6 +629,14 @@ void loop() {
   halTiltSensor.update(SETTINGS.tiltPageTurn, SETTINGS.orientation, activityManager.isReaderActivity());
 
   renderer.setFadingFix(SETTINGS.fadingFix);
+
+  if (BoardConfig::isLilyGoT5_47()) {
+    // No-op on every other board (see Ed047Tc1RefreshTuning.h). Re-applied
+    // every loop like setFadingFix() above so a Settings > Display change
+    // takes effect immediately, no reboot needed.
+    freeink::setEd047Tc1MenuFullCleanInterval(SETTINGS.getMenuRefreshCleanInterval());
+    freeink::setEd047Tc1FullRefreshClearCycles(SETTINGS.getFullRefreshDepth());
+  }
 
   if (Serial && millis() - lastMemPrint >= 10000) {
     LOG_INF("MEM", "Free: %d bytes, Total: %d bytes, Min Free: %d bytes, MaxAlloc: %d bytes", ESP.getFreeHeap(),
@@ -657,6 +726,23 @@ void loop() {
     return;
   }
 
+#if FREEINK_DEVICE_LILYGO_T5_47
+  // Re-enabled now that the LC709203F gauge gives a real, CRC-verified
+  // reading (the SDA/SCL swap that was breaking every I2C transaction is
+  // fixed -- see BatteryMonitor.cpp's lc709203f* functions). Checks the gauge
+  // through the same cached path everything else uses; no render lock needed
+  // since I2C doesn't touch the EPD rail (unlike the old ADC path).
+  static unsigned long lastLowBatteryCheckMs = 0;
+  if (BoardConfig::isLilyGoT5_47() && !deepSleepInProgress && millis() - lastLowBatteryCheckMs >= 30000) {
+    lastLowBatteryCheckMs = millis();
+    if (powerManager.getBatteryPercentage() <= 5) {
+      LOG_INF("BAT", "Battery critical, showing low-power message and sleeping");
+      enterDeepSleep(false, true);
+      return;
+    }
+  }
+#endif
+
   // A hold that woke the device must be released before it can count as a new
   // in-app long press. Otherwise a user who keeps holding after wake would put
   // the device straight back to sleep once allowSleepAt expires.
@@ -724,7 +810,9 @@ void loop() {
     if (millis() - lastActivityTime >= HalPowerManager::IDLE_POWER_SAVING_MS) {
       // If we've been inactive for a while, increase the delay to save power
       powerManager.setPowerSaving(true);  // Lower CPU frequency after extended inactivity
-      delay(50);
+      if (!powerManager.lightSleepIfIdle()) {
+        delay(50);
+      }
     } else {
       // Short delay to prevent tight loop while still being responsive
       delay(10);

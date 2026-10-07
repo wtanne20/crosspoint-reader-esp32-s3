@@ -98,14 +98,35 @@ void BaseTheme::fillBatteryIcon(const GfxRenderer& renderer, Rect rect, uint16_t
   }
 }
 
+const char* BaseTheme::batteryStatusText(uint16_t percentage) {
+#if FREEINK_DEVICE_LILYGO_T5_47
+  if (BoardConfig::isLilyGoT5_47()) {
+    switch (powerManager.getBatteryBucket()) {
+      case HalPowerManager::BatteryBucket::Warning:
+        return tr(STR_BATTERY_WARNING);
+      case HalPowerManager::BatteryBucket::Low:
+        return tr(STR_BATTERY_LOW);
+      case HalPowerManager::BatteryBucket::Good:
+        return tr(STR_BATTERY_GOOD);
+      case HalPowerManager::BatteryBucket::Full:
+        return tr(STR_BATTERY_FULL);
+    }
+  }
+#endif
+  // Overwritten on the next call -- use immediately, don't hold the pointer.
+  static char buf[8];
+  snprintf(buf, sizeof(buf), "%u%%", static_cast<unsigned>(percentage));
+  return buf;
+}
+
 void BaseTheme::drawBatteryLeft(const GfxRenderer& renderer, Rect rect, const bool showPercentage) const {
   // Left aligned: icon on left, percentage on right (reader mode)
   const uint16_t percentage = powerManager.getBatteryPercentage();
   const int y = rect.y + 6;
 
   if (showPercentage) {
-    const auto percentageText = std::to_string(percentage) + "%";
-    renderer.drawText(SMALL_FONT_ID, rect.x + batteryPercentSpacing + rect.width, rect.y, percentageText.c_str());
+    renderer.drawText(SMALL_FONT_ID, rect.x + batteryPercentSpacing + rect.width, rect.y,
+                       batteryStatusText(percentage));
   }
 
   const Rect iconRect{rect.x, y, rect.width, rect.height};
@@ -422,8 +443,7 @@ void BaseTheme::drawHeader(const GfxRenderer& renderer, Rect rect, const char* t
   const bool showBatteryPercentage =
       SETTINGS.hideBatteryPercentage != CrossPointSettings::HIDE_BATTERY_PERCENTAGE::HIDE_ALWAYS;
   const uint16_t percentage = powerManager.getBatteryPercentage();
-  char percentText[8];
-  snprintf(percentText, sizeof(percentText), "%u%%", static_cast<unsigned>(percentage));
+  const char* percentText = batteryStatusText(percentage);
   // The icon glyph extends 2px past glyphWidth (terminal nub); reserve it or
   // the percent label's rect comes up short and the text truncates.
   constexpr int16_t batteryNubWidth = 2;
@@ -975,8 +995,7 @@ void BaseTheme::drawStatusBar(GfxRenderer& renderer, const float bookProgress, c
     if (showBatteryPercentage) {
       const uint16_t percentage = powerManager.getBatteryPercentage();
       // width of icon + spacing + text for layout purposes
-      batteryWidth +=
-          batteryPercentSpacing + renderer.getTextWidth(SMALL_FONT_ID, (std::to_string(percentage) + "%").c_str());
+      batteryWidth += batteryPercentSpacing + renderer.getTextWidth(SMALL_FONT_ID, batteryStatusText(percentage));
     }
 
     leftClusterWidth += batteryWidth;

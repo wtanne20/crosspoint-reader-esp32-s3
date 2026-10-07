@@ -275,4 +275,11 @@ class BaseTheme {
   static constexpr int batteryPercentSpacing = 4;
   static void drawBatteryOutline(const GfxRenderer& renderer, int x, int y, int battWidth, int rectHeight);
   static void drawBatteryLightningBolt(const GfxRenderer& renderer, int boltX, int boltY);
+  // Text shown next to the battery icon. T5_47's gauge only supports a coarse
+  // Warning/Low/Good/Full read (see HalPowerManager::getBatteryBucket()), so
+  // it gets a translated word instead of a number that implies more precision
+  // than the sensor has; every other board keeps showing "NN%". Centralized
+  // here so all 3 call sites (drawBatteryLeft, and the two inline status-bar
+  // uses) stay consistent instead of duplicating the board check.
+  static const char* batteryStatusText(uint16_t percentage);
 };

@@ -65,6 +65,14 @@ class HalPowerManager {
   // Get battery percentage (range 0-100)
   uint16_t getBatteryPercentage() const;
 
+  // T5_47's 4-state indicator (see getBatteryPercentage()'s T5_47 branch in
+  // the .cpp for why a precise percentage isn't trustworthy on this board's
+  // voltage-based gauge). Meaningful only after a call to
+  // getBatteryPercentage() on the same board/config; Warning on every other
+  // board (unused there -- they show a real percentage instead).
+  enum class BatteryBucket : uint8_t { Warning, Low, Good, Full };
+  BatteryBucket getBatteryBucket() const;
+
   // True once a call to getBatteryPercentage() has landed in the lowest
   // ("Warning") bucket. T5_47 only; every other board keeps using
   // getBatteryPercentage() <= threshold directly for this check, since they

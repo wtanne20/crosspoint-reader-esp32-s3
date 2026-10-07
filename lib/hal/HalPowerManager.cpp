@@ -273,14 +273,19 @@ uint16_t HalPowerManager::readBatteryMillivoltsForced() const {
   return battery.readMillivolts();
 }
 
-bool HalPowerManager::isBatteryWarningLevel() const {
+HalPowerManager::BatteryBucket HalPowerManager::getBatteryBucket() const {
 #if FREEINK_DEVICE_LILYGO_T5_47
   if (BoardConfig::isLilyGoT5_47() && BoardConfig::ACTIVE.batteryGauge.gaugeAddr != 0) {
-    return _batteryBucket == 0;
+    return static_cast<BatteryBucket>(_batteryBucket);
   }
 #endif
-  return false;
+  // Meaningless on every other board (they show a real percentage instead) --
+  // default to the "safe" end (not Warning) so a call site that forgets the
+  // board gate fails quiet rather than reporting a false low-battery state.
+  return BatteryBucket::Full;
 }
+
+bool HalPowerManager::isBatteryWarningLevel() const { return getBatteryBucket() == BatteryBucket::Warning; }
 
 HalPowerManager::Lock::Lock() {
   xSemaphoreTake(powerManager.modeMutex, portMAX_DELAY);

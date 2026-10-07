@@ -740,10 +740,16 @@ void loop() {
   // fixed -- see BatteryMonitor.cpp's lc709203f* functions). Checks the gauge
   // through the same cached path everything else uses; no render lock needed
   // since I2C doesn't touch the EPD rail (unlike the old ADC path).
+  // getBatteryPercentage() now returns one of 4 representative values for
+  // this board's Warning/Low/Good/High indicator (see HalPowerManager.cpp),
+  // not a real percentage, so isBatteryWarningLevel() checks the bucket
+  // directly instead of a numeric threshold -- call getBatteryPercentage()
+  // first so there's a fresh bucket for it to report.
   static unsigned long lastLowBatteryCheckMs = 0;
   if (BoardConfig::isLilyGoT5_47() && !deepSleepInProgress && millis() - lastLowBatteryCheckMs >= 30000) {
     lastLowBatteryCheckMs = millis();
-    if (powerManager.getBatteryPercentage() <= 5) {
+    powerManager.getBatteryPercentage();
+    if (powerManager.isBatteryWarningLevel()) {
       LOG_INF("BAT", "Battery critical, showing low-power message and sleeping");
       enterDeepSleep(false, true);
       return;

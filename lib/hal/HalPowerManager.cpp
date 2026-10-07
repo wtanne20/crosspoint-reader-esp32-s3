@@ -184,6 +184,43 @@ bool HalPowerManager::lightSleepIfIdle() {
 #endif
 }
 
+#if FREEINK_DEVICE_LILYGO_T5_47
+namespace {
+// 4-bucket battery indicator for T5_47: a voltage-based gauge on this board
+// can't support a trustworthy single-percent reading (post-charge relaxation,
+// load-dependent voltage sag, a generic discharge-curve model not tuned to
+// this exact cell -- see the investigation this was built from), so showing
+// a precise number implies accuracy the sensor doesn't have and makes normal
+// voltage noise look like active drain. Reusing the existing icon-fill +
+// percent-text UI (BaseTheme::fillBatteryIcon/drawBatteryLeft etc.) with a
+// coarse, rarely-changing value instead is a smaller, lower-risk change than
+// adding new UI code paths, and solves the same problem: a stable
+// Warning/Low/Good/High read is actually more honest than a twitchy 73%.
+//
+// Boundaries (mV) roughly match the existing LIION_NOTCH_MV discharge curve
+// (BatteryMonitor.cpp): Warning below the curve's own 0% anchor (3450mV),
+// Low ~0-10%, Good ~20-80% (this chemistry's famously flat middle -- most of
+// the pack's real usable capacity lives in this one wide band, so losing
+// resolution here reflects the cell's own curve, not a shortcut), High
+// ~90-100%. Representative percents (10/40/70/100) are chosen for a visibly
+// distinct icon-fill level per bucket, not meant to be read as precise.
+constexpr uint16_t kBatteryBucketThresholdsMv[3] = {3500, 3700, 4000};
+constexpr uint16_t kBatteryBucketHysteresisMv = 20;
+constexpr uint16_t kBatteryBucketRepresentativePercent[4] = {10, 40, 70, 100};
+
+uint16_t batteryBucketPercent(uint16_t millivolts, uint8_t& previousBucket) {
+  uint8_t bucket = previousBucket <= 3 ? previousBucket : 0;
+  // Move up a bucket once clearly past the next boundary, or down once
+  // clearly below the current one -- the hysteresis band prevents a reading
+  // sitting right on a line from flapping between two buckets.
+  while (bucket < 3 && millivolts >= kBatteryBucketThresholdsMv[bucket] + kBatteryBucketHysteresisMv) ++bucket;
+  while (bucket > 0 && millivolts < kBatteryBucketThresholdsMv[bucket - 1] - kBatteryBucketHysteresisMv) --bucket;
+  previousBucket = bucket;
+  return kBatteryBucketRepresentativePercent[bucket];
+}
+}  // namespace
+#endif
+
 uint16_t HalPowerManager::getBatteryPercentage() const {
 #if FREEINK_DEVICE_LILYGO_T5_47
   // This board's battery-sense divider rides the EPD boost rail (see
@@ -206,6 +243,14 @@ uint16_t HalPowerManager::getBatteryPercentage() const {
     }
 
     _batteryLastPollMs = now;
+#if FREEINK_DEVICE_LILYGO_T5_47
+    if (BoardConfig::isLilyGoT5_47()) {
+      const uint16_t mv = battery.readMillivolts();
+      if (mv == 0) return _batteryCachedPercent;  // failed read, keep showing the last good bucket
+      _batteryCachedPercent = batteryBucketPercent(mv, _batteryBucket);
+      return _batteryCachedPercent;
+    }
+#endif
     uint16_t percent = 0;
     if (!battery.readPercentageChecked(percent)) {
       return _batteryCachedPercent;
@@ -226,6 +271,15 @@ uint16_t HalPowerManager::getBatteryPercentage() const {
 uint16_t HalPowerManager::readBatteryMillivoltsForced() const {
   static const BatteryMonitor battery;
   return battery.readMillivolts();
+}
+
+bool HalPowerManager::isBatteryWarningLevel() const {
+#if FREEINK_DEVICE_LILYGO_T5_47
+  if (BoardConfig::isLilyGoT5_47() && BoardConfig::ACTIVE.batteryGauge.gaugeAddr != 0) {
+    return _batteryBucket == 0;
+  }
+#endif
+  return false;
 }
 
 HalPowerManager::Lock::Lock() {

@@ -19,6 +19,12 @@ class HalPowerManager {
 
   mutable int _batteryCachedPercent = 0;         // Last read battery percentage (0-100)
   mutable unsigned long _batteryLastPollMs = 0;  // Timestamp of last battery read in milliseconds
+#if FREEINK_DEVICE_LILYGO_T5_47
+  // Current Warning/Low/Good/High bucket (0-3) for the 4-state indicator --
+  // see getBatteryPercentage()'s T5_47 branch. Kept across calls so the
+  // hysteresis band has a previous state to compare against.
+  mutable uint8_t _batteryBucket = 0;
+#endif
 
   enum LockMode { None, NormalSpeed };
   LockMode currentLockMode = None;
@@ -58,6 +64,14 @@ class HalPowerManager {
 
   // Get battery percentage (range 0-100)
   uint16_t getBatteryPercentage() const;
+
+  // True once a call to getBatteryPercentage() has landed in the lowest
+  // ("Warning") bucket. T5_47 only; every other board keeps using
+  // getBatteryPercentage() <= threshold directly for this check, since they
+  // still return a real percentage. Call getBatteryPercentage() first on the
+  // same cache cycle -- this just reports the last bucket it computed, it
+  // doesn't take its own reading.
+  bool isBatteryWarningLevel() const;
 
   // Forced, uncached millivolt read, bypassing getBatteryPercentage()'s
   // cache -- for pinning an exact voltage to a precise moment (e.g. the

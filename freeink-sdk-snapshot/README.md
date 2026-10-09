@@ -1,50 +1,69 @@
-# freeink-sdk snapshot — battery gauge + overnight-drain fixes
+# freeink-sdk snapshot — LilyGo T5 4.7 board support (full backup)
 
 The actual build uses these files from the `freeink-sdk` git submodule
 (`origin` = `https://github.com/Free-Ink/freeink-sdk.git`, a shared upstream
 project repo this fork doesn't have push access to). That submodule checkout
-is currently on a detached HEAD, so its local commits aren't reachable from
-any branch and can't be pushed there directly.
+has never had any of this work committed inside it — it's all sitting as
+uncommitted local changes (modified tracked files plus brand-new untracked
+files) relative to the upstream-pinned commit it's checked out at.
 
-This directory is a plain-file **copy** of that submodule's current state for
-the three files touched by the LC709203F fuel-gauge integration, kept here so
-the work is backed up to this repo instead of only existing in an uncommitted
-local submodule checkout. It is not wired into the build (nothing references
+This directory is a plain-file **copy** of that submodule's current state,
+covering the entire LilyGo T5 4.7 board-support effort (display driver,
+battery gauge, power management, board profile) so none of it only exists in
+an uncommitted local submodule checkout that could be lost if that checkout
+is ever reset. It is not wired into the build (nothing references
 `freeink-sdk-snapshot/` from `platformio.ini`'s `lib_deps`) — the real source
 of truth remains the submodule at `freeink-sdk/`.
 
-**Note on scope:** `BoardConfig.h` is a full-file copy, not a minimal diff —
-the LC709203F gauge config is one field inside the much larger `LILYGO_T5_47`
-board profile struct (added in an earlier session's T5_47 board bring-up
-work), and the two can't be cleanly separated. `BatteryMonitor.h`/`.cpp` are
-likewise full current copies, including some earlier `percentageFromMillivoltsStepped`
-support that predates today's gauge work but is part of the same battery-
-reading effort.
+**Note on scope:** several files here (`BoardConfig.h`, `BatteryMonitor.h/.cpp`,
+`Ed047Tc1Driver.cpp`) are full-file copies, not minimal diffs — this board's
+support was built up across several sessions and the pieces can't be cleanly
+separated from each other.
 
 ## Files
 
-- `libs/hardware/BatteryMonitor/include/BatteryMonitor.h`
-- `libs/hardware/BatteryMonitor/src/BatteryMonitor.cpp` — LC709203F register
-  reads (RSOC, cell voltage), CRC8 (SMBus PEC), init sequence (now
-  retry-on-failure instead of latching "done" after a failed write), and an
-  I2C bus-recovery routine.
-- `libs/hardware/BoardConfig/include/BoardConfig.h` — `GaugeType::Lc709203f`,
-  the `FREEINK_BATTERY_I2C_GAUGE` gate, and the T5_47 profile's `batteryGauge`
-  field (GPIO17 SCL / GPIO18 SDA, address 0x0B).
+- `libs/hardware/BatteryMonitor/include/BatteryMonitor.h` /
+  `src/BatteryMonitor.cpp` — LC709203F register reads (RSOC, cell voltage),
+  CRC8 (SMBus PEC), retry-on-failure init, I2C bus-recovery routine.
+- `libs/hardware/BoardConfig/include/BoardConfig.h` — the `LILYGO_T5_47`
+  board profile: geometry, `DisplayController::Ed047Direct`, buttons, ADC
+  battery, SD pins, `GaugeType::Lc709203f` / `FREEINK_BATTERY_I2C_GAUGE`.
 - `libs/hardware/PowerManager/include/PowerManager.h` / `src/PowerManager.cpp`
-  — `waitForPowerButtonRelease()` now bounded (10s timeout instead of an
-  unbounded spin that could keep the device awake all night at full CPU
-  power), plus a persistent `stuckReleaseCount()` diagnostic that survives
-  deep sleep/restart.
+  — bounded `waitForPowerButtonRelease()` (10s timeout) plus a persistent
+  `stuckReleaseCount()` diagnostic that survives deep sleep/restart.
 - `libs/hardware/SDCardManager/src/SDCardManager.cpp` — releases a CS-pin
   hold on init (paired with the HalPowerManager.cpp change in the main repo
   that holds SD CS high through sleep on boards with no SD power-enable pin).
-- `libs/display/FreeInkDisplay/src/driver/Ed047Tc1Driver.cpp` — holds the
-  ED047TC1 shift-register's 3 control pins (CFG_DATA/CFG_CLK/CFG_STR) through
-  deep sleep so they can't pick up noise and accidentally re-latch the panel
-  boost rail on; this file is a full copy (it's untracked/new in the
-  submodule from an earlier session's T5_47 display-driver work, not
-  something this fix can be cleanly separated from).
+- `libs/hardware/BoardT5_47/` — `BoardT5_47` HAL glue (battery percent
+  throttling, board-specific helpers); `library.json` for the PlatformIO lib.
+- `libs/ui/FreeInkUI/include/FreeInkUIGfxRenderer.h` — renderer interface
+  additions this board's driver needs.
+- `libs/display/FreeInkDisplay/src/FreeInkDisplay.cpp` — wiring for the
+  Ed047Direct controller path.
+- `libs/display/FreeInkDisplay/include/Ed047Tc1Battery.h` — battery-voltage
+  read via the shared shift-register-gated boost rail.
+- `libs/display/FreeInkDisplay/include/Ed047Tc1RefreshTuning.h` — runtime
+  tunables (`setEd047Tc1MenuFullCleanInterval`, `setFullRefreshClearCycles`)
+  exposed to Settings.
+- `libs/display/FreeInkDisplay/src/driver/Ed047Tc1Driver.{h,cpp}` — the main
+  panel driver: I2S/RMT row output, differential MODE_DU fast path, legacy
+  15-phase clear-first fallback, consecutive-diff-draw safety net, shift-
+  register pin holds through deep sleep.
+- `libs/display/FreeInkDisplay/src/driver/Ed047Tc1DiffWaveform.{h,cpp}` —
+  the differential-draw implementation consuming the vendored MODE_DU LUT.
+  Currently uses a **locally-owned 9-phase repeat** of the vendored 5-phase
+  waveform (same proven-safe 1000 dus/phase duration, just repeated more
+  times) to reduce "text stacking" ghosting on quick page turns — see the
+  comment above `kSettlePhaseCount` in `Ed047Tc1DiffWaveform.cpp` for why
+  duration itself (not repeat count) is the fragile parameter here: an
+  earlier attempt to lengthen one phase's duration corrupted the display by
+  desyncing the RMT-driven CKV pulse from the I2S DMA row cadence.
+- `libs/display/FreeInkDisplay/src/driver/vendor/` — vendored third-party
+  waveform/driver data: `ed047tc1/` (LilyGo's own driver code, GPLv3) and
+  `epdiy/` (the MODE_DU waveform LUT data, LGPLv3). See each directory's own
+  `NOTICE.md`/`LICENSE` for provenance; these must stay byte-for-byte copies
+  of upstream, any local tuning happens in `Ed047Tc1DiffWaveform.cpp` instead.
+- `docs/lilygo-t5-47-support.md` — the board's own design-history doc.
 
 ## To actually apply this to the submodule
 
@@ -53,14 +72,19 @@ The submodule checkout under `freeink-sdk/` already has these exact changes
 
 ```sh
 cd freeink-sdk
-git checkout -b feature/t5-47-overnight-drain-fixes
-git add libs/hardware/BatteryMonitor/include/BatteryMonitor.h \
-        libs/hardware/BatteryMonitor/src/BatteryMonitor.cpp \
-        libs/hardware/BoardConfig/include/BoardConfig.h \
-        libs/hardware/PowerManager/include/PowerManager.h \
-        libs/hardware/PowerManager/src/PowerManager.cpp \
-        libs/hardware/SDCardManager/src/SDCardManager.cpp \
-        libs/display/FreeInkDisplay/src/driver/Ed047Tc1Driver.cpp
-git commit -m "fix: overnight battery drain on LilyGo T5 4.7"
+git checkout -b feature/t5-47-board-support
+git add libs/hardware/BatteryMonitor libs/hardware/BoardConfig \
+        libs/hardware/PowerManager libs/hardware/SDCardManager \
+        libs/hardware/BoardT5_47 libs/ui/FreeInkUI/include/FreeInkUIGfxRenderer.h \
+        libs/display/FreeInkDisplay/src/FreeInkDisplay.cpp \
+        libs/display/FreeInkDisplay/include/Ed047Tc1Battery.h \
+        libs/display/FreeInkDisplay/include/Ed047Tc1RefreshTuning.h \
+        libs/display/FreeInkDisplay/src/driver/Ed047Tc1Driver.cpp \
+        libs/display/FreeInkDisplay/src/driver/Ed047Tc1Driver.h \
+        libs/display/FreeInkDisplay/src/driver/Ed047Tc1DiffWaveform.cpp \
+        libs/display/FreeInkDisplay/src/driver/Ed047Tc1DiffWaveform.h \
+        libs/display/FreeInkDisplay/src/driver/vendor \
+        docs/lilygo-t5-47-support.md
+git commit -m "feat: LilyGo T5 4.7 board support"
 # then push to your own fork of Free-Ink/freeink-sdk, not origin
 ```

@@ -130,8 +130,17 @@ bool ensurePrevScratch(size_t bytes) {
 // lets each call site pick its own depth via epd_clear_area_cycles().
 constexpr int32_t kClearCycleTimeUs = 50;  // matches epd_clear_area()'s own default
 
+// Sequenced rail shutdown, then clear every shift-register bit. epd_poweroff()
+// alone leaves QP5 (PWR_EN) set, which keeps the switched 3V3 rail -- and with
+// it the LT1945 boost and the +/-15V regulators -- running between refreshes.
+// Every draw starts with epd_poweron(), so nothing relies on PWR_EN staying up.
+void powerDownPanel() {
+  epd_poweroff();
+  epd_poweroff_all();
+}
+
 void drawRect(const uint8_t* fb1bpp, uint16_t fbWidthBytes, int32_t x, int32_t y, int32_t w, int32_t h,
-              int32_t clearCycles, bool turnOff) {
+              int32_t clearCycles) {
   if (w <= 0 || h <= 0) return;
   const size_t need = packedRowBytes(w) * static_cast<size_t>(h);
   if (!ensureScratch(need)) return;
@@ -141,11 +150,7 @@ void drawRect(const uint8_t* fb1bpp, uint16_t fbWidthBytes, int32_t x, int32_t y
   epd_poweron();
   if (clearCycles > 0) epd_clear_area_cycles(area, clearCycles, kClearCycleTimeUs);
   epd_draw_image(area, g_packed, BLACK_ON_WHITE);
-  if (turnOff) {
-    epd_poweroff_all();
-  } else {
-    epd_poweroff();
-  }
+  powerDownPanel();
 }
 
 }  // namespace
@@ -171,6 +176,12 @@ void Ed047Tc1Driver::begin(EpdBus& bus) {
     gpio_hold_dis(pin);
   }
   epd_init();
+  // Keep the shift-register control lines driven through light sleep. The
+  // 4094's output latch is transparent while STR is high, so floating CLK/DATA
+  // during the idle light-sleep cycles could clock PWR_EN back on.
+  for (gpio_num_t pin : {CFG_DATA, CFG_CLK, CFG_STR}) {
+    gpio_sleep_sel_dis(pin);
+  }
   const auto& g = geometry();
   ensureScratch(packedRowBytes(g.width) * g.height);
   ensurePrevScratch(packedRowBytes(g.width) * g.height);
@@ -233,11 +244,8 @@ void Ed047Tc1Driver::display(EpdBus& bus, const uint8_t* fb, const uint8_t* prev
     epd_clear_area_cycles(area, g_fullRefreshClearCycles, kClearCycleTimeUs);
     epd_draw_image(area, g_packed, BLACK_ON_WHITE);
   }
-  if (turnOff) {
-    epd_poweroff_all();
-  } else {
-    epd_poweroff();
-  }
+  powerDownPanel();
+  (void)turnOff;
 
   if (ensurePrevScratch(fullBytes)) {
     memcpy(g_prevPacked, g_packed, fullBytes);
@@ -266,7 +274,8 @@ void Ed047Tc1Driver::displayWindow(EpdBus& bus, const uint8_t* fb, const uint8_t
   // sub-rect it just changed. g_prevValid = false below forces the next
   // display() call back to its own legacy path rather than risk diffing
   // against that stale region.
-  drawRect(fb, g.widthBytes, x, y, w, h, /*clearCycles=*/1, turnOff);
+  drawRect(fb, g.widthBytes, x, y, w, h, /*clearCycles=*/1);
+  (void)turnOff;
   g_prevValid = false;
   g_diffDrawCount = 0;
 #else

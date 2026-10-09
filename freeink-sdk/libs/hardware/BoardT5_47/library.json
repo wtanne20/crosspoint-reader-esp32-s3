@@ -1,0 +1,13 @@
+{
+  "name": "BoardT5_47",
+  "version": "0.1.0",
+  "description": "FreeInk board support for LilyGo T5 4.7\" V2.3: throttled battery ADC read (the sense divider rides the EPD boost rail).",
+  "keywords": "lilygo, t5-4.7, ed047tc1, epaper, board",
+  "authors": [{"name": "FreeInk SDK Contributors"}],
+  "dependencies": {
+    "BoardConfig": "*",
+    "EInkDisplay": "*"
+  },
+  "platforms": "espressif32",
+  "frameworks": ["arduino"]
+}

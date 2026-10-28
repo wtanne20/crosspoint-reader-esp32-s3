@@ -13,6 +13,7 @@
 #include <esp_heap_caps.h>
 #include <esp_rom_gpio.h>
 #include <soc/gpio_sig_map.h>
+#include <soc/lcd_periph.h>
 
 #include "Ed047Tc1DiffWaveform.h"
 #include "vendor/ed047tc1/ed047tc1.h"
@@ -28,6 +29,38 @@ namespace {
 // (the CKH write strobe does), and a high line into the unpowered panel
 // back-feeds its switched 3V3 rail through the input protection diodes.
 constexpr gpio_num_t kPanelBusPins[] = {D0, D1, D2, D3, D4, D5, D6, D7, CKV, STH, CKH};
+
+// The i80 bus lines in the order i2s_bus_init() hands them to esp_lcd, so
+// kI80DataPins[i] carries lcd_periph_i80_signals data_sigs[i].
+constexpr gpio_num_t kI80DataPins[] = {D6, D7, D4, D5, D2, D3, D0, D1};
+bool g_busParked = false;
+
+// Between refreshes the panel rail is off, so drive the i80 lines low as plain
+// GPIOs; CKV is left on the RMT, which idles low.
+void parkPanelBus() {
+  if (g_busParked) return;
+  for (gpio_num_t pin : kI80DataPins) {
+    esp_rom_gpio_connect_out_signal(pin, SIG_GPIO_OUT_IDX, false, false);
+    gpio_set_level(pin, 0);
+  }
+  for (gpio_num_t pin : {STH, CKH}) {
+    esp_rom_gpio_connect_out_signal(pin, SIG_GPIO_OUT_IDX, false, false);
+    gpio_set_level(pin, 0);
+  }
+  g_busParked = true;
+}
+
+// Re-route the lines to the LCD_CAM i80 bus, matching esp_lcd_new_i80_bus().
+void attachPanelBus() {
+  if (!g_busParked) return;
+  const auto& bus = lcd_periph_i80_signals.buses[0];
+  for (size_t i = 0; i < sizeof(kI80DataPins) / sizeof(kI80DataPins[0]); ++i) {
+    esp_rom_gpio_connect_out_signal(kI80DataPins[i], bus.data_sigs[i], false, false);
+  }
+  esp_rom_gpio_connect_out_signal(STH, bus.dc_sig, false, false);
+  esp_rom_gpio_connect_out_signal(CKH, bus.wr_sig, false, false);
+  g_busParked = false;
+}
 
 uint8_t* g_packed = nullptr;   // scratch 4bpp buffer, sized for a full-screen draw
 size_t g_packedCap = 0;
@@ -144,6 +177,7 @@ constexpr int32_t kClearCycleTimeUs = 50;  // matches epd_clear_area()'s own def
 void powerDownPanel() {
   epd_poweroff();
   epd_poweroff_all();
+  parkPanelBus();
 }
 
 void drawRect(const uint8_t* fb1bpp, uint16_t fbWidthBytes, int32_t x, int32_t y, int32_t w, int32_t h,
@@ -154,6 +188,7 @@ void drawRect(const uint8_t* fb1bpp, uint16_t fbWidthBytes, int32_t x, int32_t y
   convertRect(fb1bpp, fbWidthBytes, x, y, w, h, g_packed);
 
   const Rect_t area = {x, y, w, h};
+  attachPanelBus();
   epd_poweron();
   if (clearCycles > 0) epd_clear_area_cycles(area, clearCycles, kClearCycleTimeUs);
   epd_draw_image(area, g_packed, BLACK_ON_WHITE);
@@ -192,6 +227,11 @@ void Ed047Tc1Driver::begin(EpdBus& bus) {
   for (gpio_num_t pin : {CFG_DATA, CFG_CLK, CFG_STR}) {
     gpio_sleep_sel_dis(pin);
   }
+  // Same for the panel bus, so the parked-low lines stay driven low.
+  for (gpio_num_t pin : kPanelBusPins) {
+    gpio_sleep_sel_dis(pin);
+  }
+  parkPanelBus();
   const auto& g = geometry();
   ensureScratch(packedRowBytes(g.width) * g.height);
   ensurePrevScratch(packedRowBytes(g.width) * g.height);
@@ -234,6 +274,7 @@ void Ed047Tc1Driver::display(EpdBus& bus, const uint8_t* fb, const uint8_t* prev
   const bool useDiff =
       mode != RefreshMode::Full && g_prevValid && g_prevPacked && g_diffDrawCount < g_maxConsecutiveDiffDraws;
 
+  attachPanelBus();
   epd_poweron();
   const bool diffOk = useDiff && epdDrawImageDiff(area, g_packed, g_prevPacked, ed047Tc1DuPhases());
   if (diffOk) {

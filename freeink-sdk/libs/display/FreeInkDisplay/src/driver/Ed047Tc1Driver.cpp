@@ -11,6 +11,8 @@
 
 #if FREEINK_DRIVER_ED047_DIRECT
 #include <esp_heap_caps.h>
+#include <esp_rom_gpio.h>
+#include <soc/gpio_sig_map.h>
 
 #include "Ed047Tc1DiffWaveform.h"
 #include "vendor/ed047tc1/ed047tc1.h"
@@ -21,6 +23,11 @@ namespace freeink {
 
 #if FREEINK_DRIVER_ED047_DIRECT
 namespace {
+
+// Panel data/clock lines driven by the LCD and RMT peripherals. Some idle high
+// (the CKH write strobe does), and a high line into the unpowered panel
+// back-feeds its switched 3V3 rail through the input protection diodes.
+constexpr gpio_num_t kPanelBusPins[] = {D0, D1, D2, D3, D4, D5, D6, D7, CKV, STH, CKH};
 
 uint8_t* g_packed = nullptr;   // scratch 4bpp buffer, sized for a full-screen draw
 size_t g_packedCap = 0;
@@ -175,6 +182,9 @@ void Ed047Tc1Driver::begin(EpdBus& bus) {
   for (gpio_num_t pin : {CFG_DATA, CFG_CLK, CFG_STR}) {
     gpio_hold_dis(pin);
   }
+  for (gpio_num_t pin : kPanelBusPins) {
+    gpio_hold_dis(pin);
+  }
   epd_init();
   // Keep the shift-register control lines driven through light sleep. The
   // 4094's output latch is transparent while STR is high, so floating CLK/DATA
@@ -312,6 +322,17 @@ void Ed047Tc1Driver::deepSleep(EpdBus& bus) {
   // calls to make the holds persist.
   for (gpio_num_t pin : {CFG_DATA, CFG_CLK, CFG_STR}) {
     gpio_hold_dis(pin);  // a hold left over from a previous cycle would make this a no-op
+    gpio_set_direction(pin, GPIO_MODE_OUTPUT);
+    gpio_set_level(pin, 0);
+    gpio_hold_en(pin);
+  }
+
+  // PowerManager::deepSleep()'s gpio_deep_sleep_hold_en() freezes every digital
+  // pad at its current level, so an idle-high panel line would back-feed the
+  // panel all night. Detach the lines from their peripherals and hold them low.
+  for (gpio_num_t pin : kPanelBusPins) {
+    gpio_hold_dis(pin);
+    esp_rom_gpio_connect_out_signal(pin, SIG_GPIO_OUT_IDX, false, false);
     gpio_set_direction(pin, GPIO_MODE_OUTPUT);
     gpio_set_level(pin, 0);
     gpio_hold_en(pin);

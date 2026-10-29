@@ -23,6 +23,7 @@
 #include <esp_sntp.h>
 #endif
 
+#include <algorithm>
 #include <cstring>
 
 #include "CrossPointSettings.h"
@@ -248,6 +249,42 @@ static bool loadSleepFrameBuffer() {
   return true;
 }
 
+constexpr char RESET_LOG_FILE[] = "/.crosspoint/reset_log.txt";
+
+// Appends one line per reset the user didn't ask for (brownout, panic,
+// watchdog), so a rare reboot leaves its cause on the SD card.
+static void logUnexpectedReset() {
+  const char* reason = nullptr;
+  switch (esp_reset_reason()) {
+    case ESP_RST_BROWNOUT:
+      reason = "brownout";
+      break;
+    case ESP_RST_PANIC:
+      reason = "panic";
+      break;
+    case ESP_RST_INT_WDT:
+    case ESP_RST_TASK_WDT:
+    case ESP_RST_WDT:
+      reason = "watchdog";
+      break;
+    case ESP_RST_CPU_LOCKUP:
+      reason = "cpu_lockup";
+      break;
+    default:
+      return;
+  }
+  HalFile file = Storage.open(RESET_LOG_FILE, O_WRITE | O_CREAT | O_APPEND);
+  if (!file) {
+    LOG_ERR("MAIN", "Failed to open %s", RESET_LOG_FILE);
+    return;
+  }
+  char line[128];
+  const int len = snprintf(line, sizeof(line), "%s reset, battery %u mV, firmware %s\n", reason,
+                           powerManager.readBatteryMillivoltsForced(), CROSSPOINT_VERSION);
+  if (len > 0) file.write(line, std::min(static_cast<size_t>(len), sizeof(line) - 1));
+  LOG_ERR("MAIN", "Unexpected reset: %s", reason);
+}
+
 // Enter deep sleep mode
 // lowBattery: leave the "Low Power, Please Charge" message on the panel instead of
 // the configured sleep screen (an e-paper keeps it with no power), then sleep.
@@ -453,6 +490,7 @@ void setup() {
   }
 
   HalSystem::checkPanic();
+  logUnexpectedReset();
 
   SETTINGS.loadFromFile();
   APP_STATE.loadFromFile();

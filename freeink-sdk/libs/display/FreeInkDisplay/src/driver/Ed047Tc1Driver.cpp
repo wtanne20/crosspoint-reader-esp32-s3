@@ -50,6 +50,18 @@ void parkPanelBus() {
   g_busParked = true;
 }
 
+// Switching PWR_EN on into a fully discharged panel rail pulls VDD3V3 low
+// enough to brown out the SoC now and then. Raise one parked line first: the
+// panel's input protection diodes then pre-charge the rail through the pad's
+// limited drive current, so the PWR_EN switch-on step is small.
+constexpr uint32_t kRailPrechargeMs = 10;
+
+void prechargePanelRail() {
+  if (!g_busParked) return;
+  gpio_set_level(CKH, 1);
+  delay(kRailPrechargeMs);
+}
+
 // Re-route the lines to the LCD_CAM i80 bus, matching esp_lcd_new_i80_bus().
 void attachPanelBus() {
   if (!g_busParked) return;
@@ -188,6 +200,7 @@ void drawRect(const uint8_t* fb1bpp, uint16_t fbWidthBytes, int32_t x, int32_t y
   convertRect(fb1bpp, fbWidthBytes, x, y, w, h, g_packed);
 
   const Rect_t area = {x, y, w, h};
+  prechargePanelRail();
   attachPanelBus();
   epd_poweron();
   if (clearCycles > 0) epd_clear_area_cycles(area, clearCycles, kClearCycleTimeUs);
@@ -274,6 +287,7 @@ void Ed047Tc1Driver::display(EpdBus& bus, const uint8_t* fb, const uint8_t* prev
   const bool useDiff =
       mode != RefreshMode::Full && g_prevValid && g_prevPacked && g_diffDrawCount < g_maxConsecutiveDiffDraws;
 
+  prechargePanelRail();
   attachPanelBus();
   epd_poweron();
   const bool diffOk = useDiff && epdDrawImageDiff(area, g_packed, g_prevPacked, ed047Tc1DuPhases());

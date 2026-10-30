@@ -40,7 +40,10 @@ class HalStorage::StorageLock {
   return SDCard.method(__VA_ARGS__);
 
 std::vector<String> HalStorage::listFiles(const char* path, int maxFiles) {
-  HAL_STORAGE_WRAPPED_CALL(listFiles, path, maxFiles);
+  StorageLock lock;
+  auto files = SDCard.listFiles(path, maxFiles);
+  if (files.empty() && SDCard.remountAfterCardError()) files = SDCard.listFiles(path, maxFiles);
+  return files;
 }
 
 String HalStorage::readFile(const char* path) { HAL_STORAGE_WRAPPED_CALL(readFile, path); }
@@ -83,7 +86,9 @@ HalFile& HalFile::operator=(HalFile&&) = default;
 
 HalFile HalStorage::open(const char* path, const oflag_t oflag) {
   StorageLock lock;  // ensure thread safety for the duration of this function
-  return HalFile(std::make_unique<HalFile::Impl>(SDCard.open(path, oflag)));
+  FsFile fsFile = SDCard.open(path, oflag);
+  if (!fsFile && SDCard.remountAfterCardError()) fsFile = SDCard.open(path, oflag);
+  return HalFile(std::make_unique<HalFile::Impl>(std::move(fsFile)));
 }
 
 bool HalStorage::mkdir(const char* path, const bool pFlag) { HAL_STORAGE_WRAPPED_CALL(mkdir, path, pFlag); }
@@ -101,6 +106,7 @@ bool HalStorage::openFileForRead(const char* moduleName, const char* path, HalFi
   StorageLock lock;  // ensure thread safety for the duration of this function
   FsFile fsFile;
   bool ok = SDCard.openFileForRead(moduleName, path, fsFile);
+  if (!ok && SDCard.remountAfterCardError()) ok = SDCard.openFileForRead(moduleName, path, fsFile);
   file = HalFile(std::make_unique<HalFile::Impl>(std::move(fsFile)));
   return ok;
 }
@@ -117,6 +123,7 @@ bool HalStorage::openFileForWrite(const char* moduleName, const char* path, HalF
   StorageLock lock;  // ensure thread safety for the duration of this function
   FsFile fsFile;
   bool ok = SDCard.openFileForWrite(moduleName, path, fsFile);
+  if (!ok && SDCard.remountAfterCardError()) ok = SDCard.openFileForWrite(moduleName, path, fsFile);
   file = HalFile(std::make_unique<HalFile::Impl>(std::move(fsFile)));
   return ok;
 }

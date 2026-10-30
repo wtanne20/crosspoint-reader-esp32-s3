@@ -160,6 +160,22 @@ bool SDCardManager::ready() const {
   return initialized;
 }
 
+bool SDCardManager::remountAfterCardError() {
+#if FREEINK_SD_SDMMC
+  return false;
+#else
+  // A missing file leaves no card error, so only a card that stopped answering
+  // gets remounted. begin() clears the error code on success.
+  const uint8_t err = sd.sdErrorCode();
+  if (initialized && err == SD_CARD_ERROR_NONE) return false;
+  // Throttled so a missing card doesn't stall every file open on a re-probe.
+  if (lastRemountAt != 0 && millis() - lastRemountAt < REMOUNT_RETRY_MS) return false;
+  lastRemountAt = millis();
+  if (Serial) Serial.printf("[%lu] [SD] Card error 0x%02X, remounting\n", millis(), err);
+  return begin();
+#endif
+}
+
 std::vector<String> SDCardManager::listFiles(const char* path, const int maxFiles) {
   std::vector<String> ret;
   if (!initialized) {

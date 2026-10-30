@@ -165,6 +165,14 @@ bool HalPowerManager::lightSleepIfIdle() {
       // InputManager::begin()'s pinMode calls) -- pressed reads LOW.
       gpio_wakeup_enable(static_cast<gpio_num_t>(pin), GPIO_INTR_LOW_LEVEL);
     }
+    // Keep the SD card's SPI lines (CS idling high) driven through light sleep.
+    // The card stays powered, so floating lines can clock noise into it and
+    // leave it unresponsive until a power cycle.
+    const auto& sd = BoardConfig::ACTIVE.sd;
+    for (int8_t pin : {sd.sclk, sd.miso, sd.mosi, sd.cs}) {
+      if (pin == BoardConfig::PIN_UNASSIGNED) continue;
+      gpio_sleep_sel_dis(static_cast<gpio_num_t>(pin));
+    }
     esp_sleep_enable_gpio_wakeup();
     wakeSourcesArmed = true;
   }

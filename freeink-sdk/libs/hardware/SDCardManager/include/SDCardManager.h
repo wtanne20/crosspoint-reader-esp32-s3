@@ -32,6 +32,9 @@ class SDCardManager {
   SDCardManager();
   bool begin();
   bool ready() const;
+  // Re-runs begin() if the last SPI transfer left a card error (the card stopped
+  // answering). Returns true when the card was remounted, so the caller can retry.
+  bool remountAfterCardError();
   // Returns the total card capacity in bytes. Cached at begin(); 0 if not mounted.
   uint64_t sdTotalBytes() const;
   // Returns used space in bytes, cached with a 20-second TTL (freeClusterCount
@@ -96,6 +99,8 @@ class SDCardManager {
   PowerHook _powerHook = nullptr;
 
   static constexpr uint32_t USED_BYTES_CACHE_TTL_MS = 20000;
+  static constexpr uint32_t REMOUNT_RETRY_MS = 2000;
+  uint32_t lastRemountAt = 0;
   uint64_t cachedTotalBytes = 0;
   uint64_t cachedUsedBytes = 0;
   uint32_t cachedUsedBytesAt = 0;

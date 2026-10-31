@@ -11,6 +11,8 @@ permissions:
 
 jobs:
   clang-format:
+    # Skipped on fix/** pushes so a branch build reports only whether the firmware compiled.
+    if: ${{ !startsWith(github.ref, 'refs/heads/fix/') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -78,18 +80,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Artifact names match the release asset names OtaUpdater requests:
-        # plain firmware.bin for the C3 X4/X3 binary, firmware-<board>.bin for
-        # the S3 boards.
+        # Artifact names match the release asset names OtaUpdater requests.
+        # This fork only ships the LilyGo T5 4.7" build.
         include:
-          - env: default
-            asset: firmware.bin
-          - env: sticky
-            asset: firmware-sticky.bin
-          - env: x4pro
-            asset: firmware-x4pro.bin
-          - env: papermono
-            asset: firmware-papermono.bin
           - env: t5_47
             asset: firmware-t5_47.bin
     steps:
